@@ -49,10 +49,19 @@ function toTitleCaseWords(value: string) {
 
 export function formatQuotaLabel(name: string) {
   const trimmed = typeof name === "string" ? name.trim() : "";
+
   if (!trimmed) return "";
 
   const mapped = QUOTA_LABEL_MAP[trimmed];
   if (mapped) return mapped;
+
+  if (/credit_freetrial/i.test(trimmed)) {
+    return "Credit Free Trial";
+  }
+
+  if (/credit/i.test(trimmed)) {
+    return "Credit";
+  }
 
   if (/^session\s*\(\d+[hm]\)$/i.test(trimmed)) {
     return "Session";

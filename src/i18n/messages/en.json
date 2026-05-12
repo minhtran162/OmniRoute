@@ -654,6 +654,7 @@
     "home": "Home",
     "dashboard": "Dashboard",
     "providers": "Providers",
+    "proxy": "Proxy",
     "combos": "Combos",
     "usage": "Usage",
     "analytics": "Analytics",
@@ -2166,7 +2167,18 @@
     "episodic": "Episodic",
     "procedural": "Procedural",
     "semantic": "Semantic",
-    "a": "A"
+    "previous": "Previous",
+    "next": "Next",
+    "pageInfo": "Page {page} of {totalPages} (Total {total} entries)",
+    "checkingHealth": "Checking health...",
+    "checkHealth": "Check Health",
+    "pipelineOk": "Pipeline OK ({latencyMs}ms)",
+    "pipelineError": "Pipeline Error",
+    "healthUnknown": "Unknown Health Status",
+    "cancel": "Cancel",
+    "save": "Save",
+    "contentPlaceholder": "Enter content",
+    "keyPlaceholder": "Enter key"
   },
   "skills": {
     "title": "Skills",
@@ -2341,7 +2353,20 @@
     "clientPayload": "Client Request Payload",
     "upstreamPayload": "Upstream Provider Payload",
     "upstreamNotSentYet": "Not sent to upstream yet",
-    "runningRequestDetailMeta": "Account: {account} — Elapsed: {elapsed}"
+    "runningRequestDetailMeta": "Account: {account} — Elapsed: {elapsed}",
+    "export": "Export",
+    "exporting": "Exporting...",
+    "exportFailed": "Export failed",
+    "timeRange": "Time Range",
+    "lastNHours": "Last {hours}",
+    "defaultRange": "default",
+    "clearAll": "Clear All",
+    "confirmClearActiveRequests": "Are you sure you want to clear all active requests?",
+    "consoleViewer": {
+      "fetchFailed": "Failed to fetch logs",
+      "copyFailed": "Failed to copy log entry",
+      "copyLogEntry": "Copy log entry"
+    }
   },
   "onboarding": {
     "welcome": "Welcome",

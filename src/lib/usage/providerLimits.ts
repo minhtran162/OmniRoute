@@ -172,6 +172,14 @@ function isNetworkFailureMessage(message: unknown): boolean {
   );
 }
 
+const AUTH_EXPIRED_PATTERNS = ["expired", "authentication", "unauthorized", "401", "re-authorize"];
+
+function isAuthExpiredMessage(usage: JsonRecord): boolean {
+  if (!usage?.message) return false;
+  const msg = String(usage.message).toLowerCase();
+  return AUTH_EXPIRED_PATTERNS.some((p) => msg.includes(p));
+}
+
 async function syncExpiredStatusIfNeeded(connection: ProviderConnectionLike, usage: JsonRecord) {
   const errorMessage = typeof usage.message === "string" ? usage.message.toLowerCase() : "";
   const isAuthError =
@@ -250,7 +258,9 @@ async function fetchLiveProviderLimitsWithOptions(
   connection: ProviderConnectionLike;
   usage: JsonRecord;
 }> {
-  let connection = (await getProviderConnectionById(connectionId)) as ProviderConnectionLike | null;
+  let connection = (await getProviderConnectionById(
+    connectionId
+  )) as unknown as ProviderConnectionLike | null;
   if (!connection) {
     throw withStatus(new Error("Connection not found"), 404);
   }
@@ -260,7 +270,16 @@ async function fetchLiveProviderLimitsWithOptions(
   }
 
   if (connection.authType !== "oauth") {
-    const usage = (await getUsageForProvider(connection, options)) as JsonRecord;
+    let usage = (await getUsageForProvider(connection, options)) as JsonRecord;
+    if (isAuthExpiredMessage(usage) && connection.accessToken) {
+      try {
+        usage = (await getUsageForProvider(connection, { forceRefresh: true })) as JsonRecord;
+      } catch (retryError: any) {
+        console.warn(
+          `[ProviderLimits] ${connection.provider}: apikey retry failed: ${retryError?.message}`
+        );
+      }
+    }
     if (isRecord(usage.quotas)) {
       setQuotaCache(connectionId, connection.provider, usage.quotas);
     }
@@ -271,7 +290,7 @@ async function fetchLiveProviderLimitsWithOptions(
 
   const proxyInfo = await resolveProxyForConnection(connectionId);
 
-  const fetchUsageWithContext = async (proxyConfig: unknown) =>
+  const fetchUsageWithContext = async (proxyConfig: unknown, forceRefresh = false) =>
     runWithProxyContext(proxyConfig, async () => {
       let conn = connection as ProviderConnectionLike;
       let wasRefreshed = false;
@@ -279,6 +298,12 @@ async function fetchLiveProviderLimitsWithOptions(
       const result = await refreshAndUpdateCredentials(conn);
       conn = result.connection;
       wasRefreshed = result.refreshed;
+
+      if (forceRefresh && !wasRefreshed) {
+        const forceResult = await refreshAndUpdateCredentials(conn);
+        conn = forceResult.connection;
+        wasRefreshed = forceResult.refreshed;
+      }
 
       if (wasRefreshed) {
         await syncToCloudIfEnabled();
@@ -318,6 +343,16 @@ async function fetchLiveProviderLimitsWithOptions(
       result.usage.message
     );
     result = await fetchUsageWithContext(null);
+  }
+
+  if (isAuthExpiredMessage(result.usage) && connection.refreshToken) {
+    try {
+      result = await fetchUsageWithContext(proxyConfig, true);
+    } catch (retryError: any) {
+      console.warn(
+        `[ProviderLimits] ${connection.provider}: force refresh retry failed: ${retryError?.message}`
+      );
+    }
   }
 
   if (isRecord(result.usage.quotas)) {
@@ -362,7 +397,7 @@ export async function syncAllProviderLimits(
 }> {
   const { source = "manual", concurrency = 5 } = options;
   const connections = (
-    (await getProviderConnections({ isActive: true })) as ProviderConnectionLike[]
+    (await getProviderConnections({ isActive: true })) as unknown as ProviderConnectionLike[]
   ).filter(isSupportedUsageConnection);
   const cacheEntries: Array<{ connectionId: string; entry: ProviderLimitsCacheEntry }> = [];
   const caches: Record<string, ProviderLimitsCacheEntry> = {};

@@ -539,7 +539,6 @@ export default function ProvidersPage() {
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t("searchProviders")}
             aria-label={t("searchProviders")}
-            className="pl-10 pr-10"
           />
           {searchQuery && (
             <button
