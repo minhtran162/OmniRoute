@@ -110,34 +110,110 @@ test("Responses -> Chat filters orphan tool outputs and supports role-based mess
   });
 });
 
-test("Responses -> Chat rejects unsupported built-in tools and background mode", () => {
+test("Responses -> Chat rejects unsupported built-in tools (non-web_search)", () => {
+  // file_search and code_interpreter are Responses-API-only tools with no Chat Completions
+  // equivalent and are not in the web_search family — they must still throw 400.
   assert.throws(
     () =>
       openaiResponsesToOpenAIRequest(
         "gpt-4o",
         {
           input: [],
-          tools: [{ type: "web_search_preview", name: "search" }],
+          tools: [{ type: "file_search", name: "search" }],
         },
         false,
         null
       ),
     (error: any) => error.statusCode === 400 && error.errorType === "unsupported_feature"
   );
+});
 
-  assert.throws(
-    () =>
-      openaiResponsesToOpenAIRequest(
-        "gpt-4o",
-        {
-          input: [],
-          background: true,
-        },
-        false,
-        null
-      ),
-    (error: any) => error.statusCode === 400 && error.errorType === "unsupported_feature"
-  );
+test("Responses -> Chat passes through web_search_preview tool (web_search family)", () => {
+  // web_search_preview is OpenAI's Responses API server tool; it matches ^web_search and
+  // is preserved as-is rather than rejected with 400.
+  const result = openaiResponsesToOpenAIRequest(
+    "gpt-4o",
+    {
+      input: [],
+      tools: [{ type: "web_search_preview", name: "search" }],
+    },
+    false,
+    null
+  ) as Record<string, unknown>;
+
+  assert.ok(Array.isArray(result.tools), "tools array must be present");
+  assert.equal((result.tools as any[])[0].type, "web_search_preview");
+});
+
+test("Responses -> Chat strips background flag and degrades to synchronous execution", () => {
+  // Previously this threw 400 unsupported_feature. OmniRoute is a forward proxy
+  // and cannot host the deferred run + poll contract, so background=true is
+  // silently dropped and the request runs synchronously. Clients that set the
+  // flag opportunistically (Capy Captain Pro, Codex agents) work unchanged.
+  const warnLog: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (msg: unknown) => warnLog.push(String(msg));
+  try {
+    const result = openaiResponsesToOpenAIRequest(
+      "gpt-5.5",
+      {
+        input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }],
+        background: true,
+      },
+      true,
+      { provider: "codex" }
+    );
+    const r = result as Record<string, unknown>;
+    assert.equal(r.background, undefined, "background flag must be stripped from output");
+    assert.ok(Array.isArray(r.messages), "translation must complete and produce messages");
+    assert.equal((r.messages as unknown[]).length, 1, "user message must be preserved");
+    assert.ok(
+      warnLog.some((m) => m.startsWith("BACKGROUND_DEGRADE provider=codex model=gpt-5.5")),
+      "BACKGROUND_DEGRADE warning log must be emitted when background=true"
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test("Responses -> Chat passes through when background flag is unset or false (no degrade log)", () => {
+  // Verifies the inverse of the degradation case: when background is absent or
+  // explicitly false, no warning should be emitted and the request body should
+  // not carry a residual background field. Guards against accidental log spam
+  // and confirms the degradation logic is conditional on background === true.
+  const warnLog: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (msg: unknown) => warnLog.push(String(msg));
+  try {
+    // Case 1: background unset
+    const r1 = openaiResponsesToOpenAIRequest(
+      "gpt-5.5",
+      { input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }] },
+      true,
+      { provider: "codex" }
+    ) as Record<string, unknown>;
+    assert.equal(r1.background, undefined, "background must be absent on output (unset case)");
+
+    // Case 2: background explicitly false
+    const r2 = openaiResponsesToOpenAIRequest(
+      "gpt-5.5",
+      {
+        input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }],
+        background: false,
+      },
+      true,
+      { provider: "codex" }
+    ) as Record<string, unknown>;
+    assert.equal(r2.background, undefined, "background must be stripped on output (false case)");
+
+    assert.equal(
+      warnLog.filter((m) => m.startsWith("BACKGROUND_DEGRADE")).length,
+      0,
+      "BACKGROUND_DEGRADE must NOT be emitted for unset or false values"
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
 });
 
 test("Chat -> Responses converts messages, tool calls, tool outputs, tools and pass-through params", () => {
@@ -297,6 +373,35 @@ test("Chat -> Responses preserves explicit reasoning objects", () => {
   assert.equal((result as any).store, false);
 });
 
+test("Chat -> Responses propagates include so upstream streams the reasoning summary", () => {
+  const result = openaiToOpenAIResponsesRequest(
+    "gpt-5.3-codex-spark",
+    {
+      messages: [{ role: "user", content: "Hello" }],
+      reasoning: { effort: "high", summary: "auto" },
+      include: ["reasoning.encrypted_content"],
+    },
+    false,
+    null
+  );
+
+  assert.deepEqual((result as any).include, ["reasoning.encrypted_content"]);
+});
+
+test("Chat -> Responses does not inject include when caller did not set one", () => {
+  const result = openaiToOpenAIResponsesRequest(
+    "gpt-5.3-codex-spark",
+    {
+      messages: [{ role: "user", content: "Hello" }],
+      reasoning: { effort: "high" },
+    },
+    false,
+    null
+  );
+
+  assert.equal((result as any).include, undefined);
+});
+
 test("Chat -> Responses maps reasoning_effort into Responses reasoning", () => {
   const result = openaiToOpenAIResponsesRequest(
     "gpt-5.3-codex-spark",
@@ -413,4 +518,164 @@ test("Chat -> Responses prefers max_completion_tokens over max_tokens when both 
   (assert as any).equal((result as any).max_output_tokens, 4096);
   assert.equal((result as any).max_tokens, undefined);
   assert.equal((result as any).max_completion_tokens, undefined);
+});
+
+test("Responses -> Chat drops `reasoning` and does not synthesize reasoning_effort without Copilot marker", () => {
+  const result = openaiResponsesToOpenAIRequest(
+    "claude-opus-4-7",
+    {
+      input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }],
+      reasoning: { effort: "high" },
+    },
+    true,
+    null
+  ) as Record<string, unknown>;
+
+  assert.equal(result.reasoning, undefined);
+  assert.equal(result.reasoning_effort, undefined);
+});
+
+test("Responses -> Chat promotes reasoning.effort to reasoning_effort when _copilotClient is set", () => {
+  const result = openaiResponsesToOpenAIRequest(
+    "claude-opus-4-7",
+    {
+      input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }],
+      reasoning: { effort: "high" },
+    },
+    true,
+    { _copilotClient: true }
+  ) as Record<string, unknown>;
+
+  assert.equal(result.reasoning, undefined);
+  assert.equal(result.reasoning_effort, "high");
+});
+
+test("Responses -> Chat normalizes Copilot reasoning.effort=max to xhigh", () => {
+  const result = openaiResponsesToOpenAIRequest(
+    "claude-opus-4-7",
+    {
+      input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }],
+      reasoning: { effort: "max" },
+    },
+    true,
+    { _copilotClient: true }
+  ) as Record<string, unknown>;
+
+  assert.equal(result.reasoning_effort, "xhigh");
+});
+
+test("Responses -> Chat keeps an explicit reasoning_effort over reasoning.effort when _copilotClient is set", () => {
+  const result = openaiResponsesToOpenAIRequest(
+    "claude-opus-4-7",
+    {
+      input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }],
+      reasoning: { effort: "low" },
+      reasoning_effort: "high",
+    },
+    true,
+    { _copilotClient: true }
+  ) as Record<string, unknown>;
+
+  assert.equal(result.reasoning_effort, "high");
+});
+
+test("Responses -> Chat ignores Copilot marker when reasoning field is absent", () => {
+  const result = openaiResponsesToOpenAIRequest(
+    "claude-opus-4-7",
+    { input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }] },
+    true,
+    { _copilotClient: true }
+  ) as Record<string, unknown>;
+
+  assert.equal(result.reasoning_effort, undefined);
+});
+
+// --- Issue #2695: web_search tool types (Anthropic versioned names) ---
+
+test("Responses -> Chat: web_search_20250305 tool does not throw (issue #2695)", () => {
+  // Claude Code sends the Anthropic versioned tool name; must NOT reject with 400.
+  assert.doesNotThrow(() =>
+    openaiResponsesToOpenAIRequest(
+      "gpt-4o",
+      {
+        input: [{ role: "user", content: [{ type: "input_text", text: "search" }] }],
+        tools: [{ type: "web_search_20250305" }],
+      },
+      false,
+      null
+    )
+  );
+});
+
+test("Responses -> Chat: web_search_20250305 tool is preserved in output tools array", () => {
+  const result = openaiResponsesToOpenAIRequest(
+    "gpt-4o",
+    {
+      input: [{ role: "user", content: [{ type: "input_text", text: "search" }] }],
+      tools: [{ type: "web_search_20250305" }],
+    },
+    false,
+    null
+  ) as Record<string, unknown>;
+
+  const tools = result.tools as any[];
+  assert.ok(Array.isArray(tools), "tools array must be present");
+  assert.equal(tools.length, 1, "one tool must be present");
+  // Original versioned name is preserved so Anthropic-compatible upstreams receive what they expect.
+  assert.equal(tools[0].type, "web_search_20250305");
+});
+
+test("Responses -> Chat: plain web_search tool does not throw", () => {
+  assert.doesNotThrow(() =>
+    openaiResponsesToOpenAIRequest(
+      "gpt-4o",
+      {
+        input: [{ role: "user", content: [{ type: "input_text", text: "search" }] }],
+        tools: [{ type: "web_search" }],
+      },
+      false,
+      null
+    )
+  );
+});
+
+test("Responses -> Chat: function tool still translates correctly (no regression)", () => {
+  const result = openaiResponsesToOpenAIRequest(
+    "gpt-4o",
+    {
+      input: [{ role: "user", content: [{ type: "input_text", text: "hello" }] }],
+      tools: [
+        {
+          type: "function",
+          name: "my_func",
+          description: "does stuff",
+          parameters: { type: "object" },
+        },
+      ],
+    },
+    false,
+    null
+  ) as Record<string, unknown>;
+
+  const tools = result.tools as any[];
+  assert.ok(Array.isArray(tools), "tools array must be present");
+  assert.equal(tools[0].type, "function");
+  assert.ok(tools[0].function, "function tool must have .function property");
+  assert.equal(tools[0].function.name, "my_func");
+});
+
+test("Responses -> Chat: unknown tool type still throws unsupported_feature (no regression)", () => {
+  assert.throws(
+    () =>
+      openaiResponsesToOpenAIRequest(
+        "gpt-4o",
+        {
+          input: [],
+          tools: [{ type: "unknown_tool_xyz" }],
+        },
+        false,
+        null
+      ),
+    (error: any) => error.statusCode === 400 && error.errorType === "unsupported_feature"
+  );
 });

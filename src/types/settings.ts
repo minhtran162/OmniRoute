@@ -1,4 +1,9 @@
-import type { HideableSidebarItemId } from "@/shared/constants/sidebarVisibility";
+import type {
+  HideableSidebarItemId,
+  SidebarItemOrder,
+  SidebarPresetId,
+  SidebarSectionId,
+} from "@/shared/constants/sidebarVisibility";
 import type { ResilienceSettings } from "@/lib/resilience/settings";
 import type {
   AccountFallbackStrategyValue,
@@ -24,14 +29,27 @@ export interface Settings {
   hideEndpointCloudflaredTunnel?: boolean;
   hideEndpointTailscaleFunnel?: boolean;
   hideEndpointNgrokTunnel?: boolean;
+  pinProviderQuotaToHome?: boolean;
+  showQuickStartOnHome?: boolean;
+  showProviderTopologyOnHome?: boolean;
   hiddenSidebarItems?: HideableSidebarItemId[];
+  sidebarSectionOrder?: SidebarSectionId[];
+  sidebarItemOrder?: SidebarItemOrder;
+  sidebarActivePreset?: SidebarPresetId;
   resilienceSettings?: ResilienceSettings;
+  // LOCAL_ONLY manage-scope bypass policy (DB-stored, hot-reloaded by
+  // `applyRuntimeSettings` → `applyAuthzBypassSection`). The route guard
+  // consults `getAuthzBypassSnapshot()` on the hot path; these fields are
+  // the persisted source of truth that feeds that snapshot.
+  localOnlyManageScopeBypassEnabled?: boolean;
+  localOnlyManageScopeBypassPrefixes?: string[];
 }
 
 export interface ComboDefaults {
   strategy: RoutingStrategyValue;
   maxRetries: number;
   retryDelayMs: number;
+  fallbackDelayMs?: number;
   maxComboDepth: number;
   trackMetrics: boolean;
   concurrencyPerModel?: number;

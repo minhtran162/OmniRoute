@@ -11,6 +11,10 @@ import { register } from "../registry.ts";
 
 type JsonRecord = Record<string, unknown>;
 const RESPONSES_STORE_MARKER = "_omnirouteResponsesStore";
+const COPILOT_REASONING_SUMMARY_MARKER = "_omnirouteCopilotReasoningSummary";
+
+// Forward-compatible regex: matches web_search, web_search_20250305, and any future versioned names.
+const WEB_SEARCH_TOOL_TYPES = /^web_search/;
 
 function toRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
@@ -27,6 +31,11 @@ function toString(value: unknown, fallback = ""): string {
 function normalizeResponsesReasoningEffort(value: unknown): string {
   const effort = toString(value).toLowerCase();
   return effort === "max" ? "xhigh" : effort;
+}
+
+function shouldRequestClaudeSummarizedThinking(value: unknown): boolean {
+  const summary = toString(value).toLowerCase();
+  return !!summary && summary !== "off" && summary !== "none" && summary !== "disabled";
 }
 
 function unsupportedFeature(message: string): Error & { statusCode: number; errorType: string } {
@@ -61,13 +70,15 @@ export function openaiResponsesToOpenAIRequest(
       const tool = toRecord(toolValue);
       const toolType = toString(tool.type);
       // Allow: function tools, tools already in Chat format (have .function property), CLI subagent tools,
-      // and namespace tools (MCP tool groups used by Codex/OpenAI Responses API).
+      // namespace tools (MCP tool groups used by Codex/OpenAI Responses API), and web_search server tools
+      // (Anthropic versioned: web_search_20250305, web_search_20250101, etc. — or plain web_search).
       if (
         toolType &&
         toolType !== "function" &&
         toolType !== "custom" &&
         toolType !== "command" &&
         toolType !== "namespace" &&
+        !WEB_SEARCH_TOOL_TYPES.test(toolType) &&
         !tool.function
       ) {
         throw unsupportedFeature(
@@ -77,13 +88,28 @@ export function openaiResponsesToOpenAIRequest(
     }
   }
 
-  if (root.background) {
-    throw unsupportedFeature(
-      "Unsupported Responses API feature: background mode is not supported by omniroute"
+  const result: JsonRecord = { ...root };
+
+  // background: true requests a deferred Responses API run (the upstream
+  // returns 202 with response_id and the client polls GET /responses/<id>).
+  // OmniRoute is a forward proxy that streams responses synchronously —
+  // implementing the queue/poll contract would require persistence and a
+  // separate retrieval surface. Degrade: log a marker when true was
+  // actually requested (operators can observe clients that should be
+  // reconfigured) and strip the flag. Clients that set background=true
+  // opportunistically (Capy Captain Pro, Codex agents) work unchanged.
+  // Clients that strictly require the async contract still observe a
+  // completed response on the first poll and can adapt.
+  if (result.background === true) {
+    const providerStr = toString(credentialRecord.provider);
+    const modelStr = toString(model);
+    console.warn(
+      `BACKGROUND_DEGRADE provider=${providerStr || "unknown"} model=${modelStr || "unknown"}`
     );
   }
-
-  const result: JsonRecord = { ...root };
+  if (result.background !== undefined) {
+    delete result.background;
+  }
   const messages: JsonRecord[] = [];
   result.messages = messages;
 
@@ -234,6 +260,13 @@ export function openaiResponsesToOpenAIRequest(
     result.tools = root.tools.map((toolValue) => {
       const tool = toRecord(toolValue);
       if (tool.function) return toolValue;
+      const toolType = toString(tool.type);
+      // Pass web_search server tools through with their original type (versioned or plain).
+      // These have no Chat Completions equivalent; preserve as-is so upstreams that understand
+      // Anthropic-style web_search_YYYYMMDD naming receive the exact name they expect.
+      if (WEB_SEARCH_TOOL_TYPES.test(toolType)) {
+        return toolValue;
+      }
       return {
         type: "function",
         function: {
@@ -292,6 +325,25 @@ export function openaiResponsesToOpenAIRequest(
     result[RESPONSES_STORE_MARKER] = root.store;
   }
   delete result.store;
+
+  // Copilot-only: promote Responses `reasoning.{effort,summary}` to Chat fields
+  // so the downstream openai-to-claude translator can enable extended thinking.
+  // Gated by the UA marker from translateRequest; other clients see `reasoning` dropped.
+  if (
+    credentialRecord._copilotClient === true &&
+    root.reasoning &&
+    typeof root.reasoning === "object" &&
+    !Array.isArray(root.reasoning)
+  ) {
+    const reasoningRec = toRecord(root.reasoning);
+    const effort = toString(reasoningRec.effort);
+    if (effort && result.reasoning_effort === undefined) {
+      result.reasoning_effort = normalizeResponsesReasoningEffort(effort);
+    }
+    if (shouldRequestClaudeSummarizedThinking(reasoningRec.summary)) {
+      result[COPILOT_REASONING_SUMMARY_MARKER] = "summarized";
+    }
+  }
   delete result.reasoning;
 
   return result;
@@ -362,13 +414,21 @@ export function openaiToOpenAIResponsesRequest(
                   }
                   return imgResult;
                 }
-                if (contentItem.type === "file") {
-                  const file = toRecord(contentItem.file);
+                if (contentItem.type === "file" || contentItem.type === "document") {
+                  // Accept both the OpenAI `file` shape and the Gemini-style `document` shape,
+                  // and map the bare `data`/`url` fields too, so a PDF reaches Codex/Responses
+                  // regardless of which content-part name the client used (#2515).
+                  const file = toRecord(
+                    contentItem.type === "document" ? contentItem.document : contentItem.file
+                  );
                   const fileResult: JsonRecord = { type: "input_file" };
                   if (file.file_data !== undefined) fileResult.file_data = file.file_data;
+                  else if (file.data !== undefined) fileResult.file_data = file.data;
                   if (file.file_id !== undefined) fileResult.file_id = file.file_id;
                   if (file.file_url !== undefined) fileResult.file_url = file.file_url;
+                  else if (file.url !== undefined) fileResult.file_url = file.url;
                   if (file.filename !== undefined) fileResult.filename = file.filename;
+                  else if (file.name !== undefined) fileResult.filename = file.name;
                   return fileResult;
                 }
                 return contentValue;
@@ -567,6 +627,14 @@ export function openaiToOpenAIResponsesRequest(
     if (effort) {
       result.reasoning = { effort };
     }
+  }
+
+  // Propagate Responses-API-only fields when a chat client sent them.
+  // Without this, e.g. `include: ["reasoning.encrypted_content"]` is lost on
+  // the way upstream and Codex returns an empty reasoning summary, so clients
+  // (OpenCode, Cursor, etc.) see no thinking stream.
+  if (Array.isArray(root.include) && root.include.length > 0) {
+    result.include = root.include;
   }
   if (storeEnabled) {
     if (root[RESPONSES_STORE_MARKER] !== undefined) {

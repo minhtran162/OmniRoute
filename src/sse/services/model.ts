@@ -1,6 +1,6 @@
 // Re-export from open-sse with localDb integration
 import { getModelAliases, getComboByName, getProviderNodes, getCustomModels } from "@/lib/localDb";
-import { getSettings } from "@/lib/localDb";
+import { getCachedSettings } from "@/lib/localDb";
 import { getComboStepTarget } from "@/lib/combos/steps";
 import {
   parseModel,
@@ -9,6 +9,35 @@ import {
 } from "@omniroute/open-sse/services/model.ts";
 
 export { parseModel };
+
+/**
+ * Build a combined model alias map that merges both alias stores:
+ * 1. DB-namespace aliases (key_value WHERE namespace='modelAliases') — set via
+ *    /api/models/alias/ and seeded at startup (e.g. gemini-cli default aliases).
+ * 2. Settings-based aliases (settings.modelAliases) — set via the Settings UI and
+ *    /api/settings/model-aliases/ (stored as a JSON blob in namespace='settings').
+ *
+ * Settings-based aliases take priority so that UI configuration always wins.
+ * Without this merge, aliases configured via the Settings UI were never consulted
+ * during provider routing, causing provider inference (e.g. /^gpt-/ → openai) to
+ * silently override them (issue #2618 / #2208).
+ */
+async function getCombinedModelAliases(): Promise<Record<string, unknown>> {
+  const [dbAliases, settings] = await Promise.all([
+    getModelAliases().catch(() => ({})),
+    getCachedSettings().catch(() => ({}) as Record<string, unknown>),
+  ]);
+
+  const settingsAliases =
+    settings.modelAliases &&
+    typeof settings.modelAliases === "object" &&
+    !Array.isArray(settings.modelAliases)
+      ? (settings.modelAliases as Record<string, unknown>)
+      : {};
+
+  // Settings-based aliases win over DB-namespace aliases on key collision
+  return { ...dbAliases, ...settingsAliases };
+}
 
 /**
  * Resolve model alias from localDb
@@ -42,6 +71,18 @@ async function lookupCustomModelApiFormat(
 export async function getModelInfo(modelStr) {
   const parsed = parseModel(modelStr);
   const { extendedContext } = parsed;
+
+  const attachCustomApiFormat = async (info: any) => {
+    if (!info?.provider || !info?.model) return info;
+    const apiFormat = await lookupCustomModelApiFormat(String(info.provider), String(info.model));
+    if (apiFormat) {
+      return {
+        ...info,
+        apiFormat,
+      };
+    }
+    return info;
+  };
 
   // Check custom provider nodes first (for both alias and non-alias formats)
   if (parsed.providerAlias || parsed.provider) {
@@ -83,9 +124,9 @@ export async function getModelInfo(modelStr) {
     // stripModelPrefix: if enabled, strip provider prefix and re-resolve
     // the bare model name using existing heuristics (claude-* → anthropic, etc.)
     try {
-      const settings = await getSettings();
+      const settings = await getCachedSettings();
       if (settings.stripModelPrefix === true) {
-        const strippedResult = await getModelInfoCore(parsed.model, getModelAliases);
+        const strippedResult = await getModelInfoCore(parsed.model, getCombinedModelAliases);
         return { ...strippedResult, extendedContext };
       }
     } catch {
@@ -94,10 +135,10 @@ export async function getModelInfo(modelStr) {
   }
 
   if (!parsed.isAlias) {
-    return getModelInfoCore(modelStr, null);
+    return await attachCustomApiFormat(await getModelInfoCore(modelStr, null));
   }
 
-  return getModelInfoCore(modelStr, getModelAliases);
+  return await attachCustomApiFormat(await getModelInfoCore(modelStr, getCombinedModelAliases));
 }
 
 /**

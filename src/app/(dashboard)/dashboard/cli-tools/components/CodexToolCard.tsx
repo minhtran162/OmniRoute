@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { Card, Button, ModelSelectModal, ManualConfigModal } from "@/shared/components";
-import Image from "next/image";
 import CliStatusBadge from "./CliStatusBadge";
 import { useTranslations } from "next-intl";
+
+import ProviderIcon from "@/shared/components/ProviderIcon";
+import { normalizeCodexBaseUrl } from "@/shared/utils/codexBaseUrl";
 
 export default function CodexToolCard({
   tool,
@@ -124,15 +126,9 @@ export default function CodexToolCard({
   // Use batch status as fallback when card hasn't been expanded yet
   const effectiveConfigStatus = configStatus || batchStatus?.configStatus || null;
 
-  const getEffectiveBaseUrl = () => {
-    const url = customBaseUrl || baseUrl;
-    return url.replace(/\/v1\/?$/, "").replace(/\/api\/?$/, "") + "/api/v1";
-  };
+  const getEffectiveBaseUrl = () => normalizeCodexBaseUrl(customBaseUrl || baseUrl, wireApi);
 
-  const getDisplayUrl = () => {
-    const url = customBaseUrl || baseUrl;
-    return url.replace(/\/v1\/?$/, "").replace(/\/api\/?$/, "") + "/api/v1";
-  };
+  const getDisplayUrl = () => normalizeCodexBaseUrl(customBaseUrl || baseUrl, wireApi);
 
   const checkCodexStatus = async () => {
     setCheckingCodex(true);
@@ -408,17 +404,7 @@ openai_base_url = "${getEffectiveBaseUrl()}"
       <div className="flex items-center justify-between hover:cursor-pointer" onClick={onToggle}>
         <div className="flex items-center gap-3">
           <div className="size-8 flex items-center justify-center shrink-0">
-            <Image
-              src="/providers/codex.png"
-              alt={tool.name}
-              width={32}
-              height={32}
-              className="size-8 object-contain rounded-lg"
-              sizes="32px"
-              onError={(e) => {
-                (e.currentTarget as HTMLElement).style.display = "none";
-              }}
-            />
+            <ProviderIcon providerId="codex" size={32} type="color" />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -550,7 +536,7 @@ openai_base_url = "${getEffectiveBaseUrl()}"
                     placeholder={t("baseUrlPlaceholder")}
                     className="flex-1 px-2 py-1.5 bg-surface rounded border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
                   />
-                  {customBaseUrl && customBaseUrl !== `${baseUrl}/v1` && (
+                  {customBaseUrl && getDisplayUrl() !== normalizeCodexBaseUrl(baseUrl, wireApi) && (
                     <button
                       onClick={() => setCustomBaseUrl("")}
                       className="p-1 text-text-muted hover:text-primary rounded transition-colors"
@@ -658,8 +644,8 @@ openai_base_url = "${getEffectiveBaseUrl()}"
                     onChange={(e) => setWireApi(e.target.value)}
                     className="flex-1 px-2 py-1.5 bg-surface rounded text-xs border border-border focus:outline-none focus:ring-1 focus:ring-primary/50"
                   >
-                    <option value="chat">Chat Completions (/chat/completions)</option>
-                    <option value="responses">Responses API (/responses)</option>
+                    <option value="chat">{t("wireApiChatCompletions")}</option>
+                    <option value="responses">{t("wireApiResponses")}</option>
                   </select>
                 </div>
 

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { listMemories, createMemory } from "@/lib/memory/store";
+import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
+import { listMemories, createMemory, getMemoryTokensUsed } from "@/lib/memory/store";
+import { memoryCache } from "@/lib/memory/cache";
 import { MemoryType } from "@/lib/memory/types";
 import { parsePaginationParams, buildPaginatedResponse } from "@/shared/types/pagination";
 import { z } from "zod";
@@ -16,6 +18,9 @@ const createMemorySchema = z.object({
 });
 
 export async function GET(request: Request) {
+  const authError = await requireManagementAuth(request);
+  if (authError) return authError;
+
   try {
     const url = new URL(request.url);
     const { searchParams } = url;
@@ -42,9 +47,20 @@ export async function GET(request: Request) {
       page: offset === undefined ? paginationParams.page : undefined,
     });
 
+    // Total tokens across all memories (computed in SQL inside the domain module
+    // to avoid loading every memory's content into process memory).
+    const tokensUsed = getMemoryTokensUsed(apiKeyId);
+
+    // Compute hit rate from memory cache
+    const cacheStats = memoryCache.stats();
+    const totalCacheRequests = cacheStats.hits + cacheStats.misses;
+    const hitRate = totalCacheRequests > 0 ? cacheStats.hits / totalCacheRequests : 0;
+
     const stats = {
       total: result.total,
       byType: result.byType ?? {},
+      tokensUsed,
+      hitRate,
     };
 
     const responsePagination =
@@ -68,6 +84,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const authError = await requireManagementAuth(request);
+  if (authError) return authError;
+
   try {
     const rawBody = await request.json();
     const validation = validateBody(createMemorySchema, rawBody);

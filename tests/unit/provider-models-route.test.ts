@@ -12,6 +12,7 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const providerModelsRoute = await import("../../src/app/api/providers/[id]/models/route.ts");
 const antigravityVersion = await import("../../open-sse/services/antigravityVersion.ts");
+const providerRegistry = await import("../../open-sse/config/providerRegistry.ts");
 
 const originalFetch = globalThis.fetch;
 const originalAllowPrivateProviderUrls = process.env.OMNIROUTE_ALLOW_PRIVATE_PROVIDER_URLS;
@@ -205,7 +206,11 @@ test("provider models route returns static catalog entries for providers with ha
 
   assert.equal(response.status, 200);
   assert.equal(body.provider, "bailian-coding-plan");
-  assert.equal(body.models.length, 8);
+  assert.equal(body.models.length, providerRegistry.REGISTRY["bailian-coding-plan"].models?.length);
+  assert.deepEqual(
+    body.models.map((model) => model.id),
+    providerRegistry.REGISTRY["bailian-coding-plan"].models?.map((model) => model.id)
+  );
 });
 
 test("provider models route returns AWS Polly speech engines from the audio registry", async () => {
@@ -350,7 +355,8 @@ test("provider models route returns the local catalog for embedding and rerank p
   assert.equal(voyageBody.provider, "voyage-ai");
   assert.equal(voyageBody.source, "local_catalog");
   assert.ok(voyageBody.models.some((model) => model.id === "voyage-4-large"));
-  assert.ok(voyageBody.models.some((model) => model.id === "voyage-3-large"));
+  assert.ok(voyageBody.models.some((model) => model.id === "voyage-code-3"));
+  assert.ok(voyageBody.models.some((model) => model.id === "voyage-4-lite"));
 
   assert.equal(jinaResponse.status, 200);
   assert.equal(jinaBody.provider, "jina-ai");
@@ -447,7 +453,7 @@ test("provider models route returns the local catalog for new built-in chat-open
   assert.match(body.warning, /local catalog/i);
   assert.ok(Array.isArray(body.models));
   assert.ok(body.models.length > 0);
-  assert.ok(body.models.some((model) => model.id === "Qwen/Qwen3-Coder-480B-A35B-Instruct"));
+  assert.ok(body.models.some((model) => model.id === "openai/gpt-oss-120b"));
 });
 
 test("provider models route merges Upstage chat and embedding catalogs", async () => {
@@ -640,18 +646,26 @@ test("provider models route retries Antigravity discovery endpoints before retur
     accessToken: "ag-access",
     apiKey: null,
   });
-  const seenUrls = [];
+  const seenUrls: string[] = [];
   antigravityVersion.seedAntigravityVersionCache("1.22.2");
 
   globalThis.fetch = async (url, init = {}) => {
-    seenUrls.push(String(url));
+    const urlString = String(url);
+    // After PR #2219, the discovery flow calls loadCodeAssist first as a project
+    // bootstrap; treat all bootstrap calls as non-fatal failures so the test
+    // exercises the discovery retry path.
+    if (urlString.includes("/v1internal:loadCodeAssist")) {
+      return new Response("nope", { status: 503 });
+    }
+    seenUrls.push(urlString);
     if (seenUrls.length === 1) {
       return new Response("unavailable", { status: 503 });
     }
 
     assert.equal(init.method, "POST");
     assert.equal(init.headers.Authorization, "Bearer ag-access");
-    assert.match(init.headers["User-Agent"], /^antigravity\//);
+    assert.match(init.headers["User-Agent"], /^Antigravity\/1\.22\.2 /);
+    assert.equal(init.headers["x-goog-api-client"], undefined);
     return Response.json({
       models: [{ id: "gemini-3-flash", displayName: "Gemini 3 Flash" }],
     });
@@ -659,13 +673,20 @@ test("provider models route retries Antigravity discovery endpoints before retur
 
   const response = await callRoute(connection.id);
   const body = (await response.json()) as any;
-  const discoveryUrls = seenUrls.filter((url) => url.includes("/v1internal:models"));
+  // After PR #2219, the route tries `:fetchAvailableModels` URLs before
+  // `:models` URLs. The test mock returns 503 on the first call and success
+  // on the second, so only the first two `:fetchAvailableModels` URLs are
+  // hit — `:models` URLs are never reached. Assert on the actual discovery
+  // sequence the route follows.
+  const discoveryUrls = seenUrls.filter(
+    (url) => url.includes("/v1internal:fetchAvailableModels") || url.includes("/v1internal:models")
+  );
 
   assert.equal(response.status, 200);
   assert.equal(body.source, "api");
   assert.deepEqual(discoveryUrls, [
-    "https://cloudcode-pa.googleapis.com/v1internal:models",
-    "https://daily-cloudcode-pa.googleapis.com/v1internal:models",
+    "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+    "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
   ]);
   assert.deepEqual(body.models, [{ id: "gemini-3-flash-preview", name: "Gemini 3 Flash" }]);
 });
@@ -691,8 +712,8 @@ test("provider models route falls back through all Antigravity discovery endpoin
   assert.equal(body.source, "local_catalog");
   assert.match(body.warning, /local catalog/i);
   assert.deepEqual(discoveryUrls, [
-    "https://cloudcode-pa.googleapis.com/v1internal:models",
     "https://daily-cloudcode-pa.googleapis.com/v1internal:models",
+    "https://cloudcode-pa.googleapis.com/v1internal:models",
     "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:models",
   ]);
   assert.ok(body.models.some((model) => model.id === "gemini-3-pro-preview"));
@@ -1089,25 +1110,58 @@ test("provider models route discovers Azure OpenAI deployments from the resource
   ]);
 });
 
-test("provider models route discovers Bedrock mantle models from the OpenAI-compatible models endpoint", async () => {
+test("provider models route discovers native Bedrock foundation models and inference profiles", async () => {
   const connection = await seedConnection("bedrock", {
     apiKey: "bedrock-key",
     providerSpecificData: {
-      baseUrl: "https://bedrock-mantle.us-east-1.api.aws",
+      region: "eu-west-2",
     },
   });
+  const seenUrls: string[] = [];
 
   globalThis.fetch = async (url, init = {}) => {
-    assert.equal(String(url), "https://bedrock-mantle.us-east-1.api.aws/v1/models");
+    const target = String(url);
+    seenUrls.push(target);
     assert.equal(init.method, "GET");
     assert.equal(init.headers.Authorization, "Bearer bedrock-key");
 
-    return Response.json({
-      data: [
-        { id: "openai.gpt-oss-120b", display_name: "OpenAI GPT-OSS 120B" },
-        { id: "mistral.mistral-large-3-675b-instruct" },
-      ],
-    });
+    if (
+      target === "https://bedrock.eu-west-2.amazonaws.com/foundation-models?byOutputModality=TEXT"
+    ) {
+      return Response.json({
+        modelSummaries: [
+          {
+            modelId: "anthropic.claude-sonnet-4-6",
+            modelName: "Claude Sonnet 4.6",
+            providerName: "Anthropic",
+            inputModalities: ["TEXT", "IMAGE"],
+            outputModalities: ["TEXT"],
+            responseStreamingSupported: true,
+          },
+        ],
+      });
+    }
+
+    if (
+      target ===
+      "https://bedrock.eu-west-2.amazonaws.com/inference-profiles?maxResults=100&typeEquals=SYSTEM_DEFINED"
+    ) {
+      return Response.json({
+        inferenceProfileSummaries: [
+          {
+            inferenceProfileId: "eu.anthropic.claude-sonnet-4-6",
+            inferenceProfileName: "EU Claude Sonnet 4.6",
+            models: [
+              {
+                modelArn: "arn:aws:bedrock:eu-west-2::foundation-model/anthropic.claude-sonnet-4-6",
+              },
+            ],
+          },
+        ],
+      });
+    }
+
+    throw new Error("unexpected fetch: " + target);
   };
 
   const response = await callRoute(connection.id);
@@ -1116,16 +1170,29 @@ test("provider models route discovers Bedrock mantle models from the OpenAI-comp
   assert.equal(response.status, 200);
   assert.equal(body.provider, "bedrock");
   assert.equal(body.source, "api");
+  assert.deepEqual(seenUrls, [
+    "https://bedrock.eu-west-2.amazonaws.com/foundation-models?byOutputModality=TEXT",
+    "https://bedrock.eu-west-2.amazonaws.com/inference-profiles?maxResults=100&typeEquals=SYSTEM_DEFINED",
+  ]);
   assert.deepEqual(body.models, [
     {
-      id: "openai.gpt-oss-120b",
-      name: "OpenAI GPT-OSS 120B",
-      owned_by: "bedrock",
+      id: "anthropic.claude-sonnet-4-6",
+      name: "Claude Sonnet 4.6",
+      owned_by: "Anthropic",
+      source: "foundation",
+      supportsStreaming: true,
+      supportsVision: true,
+      inputTokenLimit: 1000000,
+      outputTokenLimit: 64000,
     },
     {
-      id: "mistral.mistral-large-3-675b-instruct",
-      name: "mistral.mistral-large-3-675b-instruct",
+      id: "eu.anthropic.claude-sonnet-4-6",
+      name: "EU Claude Sonnet 4.6",
       owned_by: "bedrock",
+      source: "inference_profile",
+      supportsStreaming: true,
+      inputTokenLimit: 1000000,
+      outputTokenLimit: 64000,
     },
   ]);
 });

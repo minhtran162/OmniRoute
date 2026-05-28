@@ -1,16 +1,28 @@
 "use client";
 
 import { useEffect } from "react";
+import { useTranslations } from "next-intl";
 
 function relativeTime(ts: number): string {
   const diffMs = Date.now() - ts * 1000;
-  const diffSec = Math.round(diffMs / 1000);
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const diffMin = Math.round(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.round(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  return `${Math.round(diffHr / 24)}d ago`;
+  const isFuture = diffMs < 0;
+  const absDiffMs = Math.abs(diffMs);
+  const diffSec = Math.round(absDiffMs / 1000);
+
+  let res = "";
+  if (diffSec < 60) res = `${diffSec}s`;
+  else {
+    const diffMin = Math.round(diffSec / 60);
+    if (diffMin < 60) res = `${diffMin}m`;
+    else {
+      const diffHr = Math.round(diffMin / 60);
+      if (diffHr < 24) res = `${diffHr}h`;
+      else res = `${Math.round(diffHr / 24)}d`;
+    }
+  }
+
+  if (isFuture) return `in ${res}`;
+  return `${res} ago`;
 }
 
 interface BatchRecord {
@@ -124,6 +136,7 @@ function formatTs(ts: number | null | undefined): string {
 }
 
 export default function BatchDetailModal({ batch, files, onClose }: BatchDetailModalProps) {
+  const t = useTranslations("common");
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -164,12 +177,23 @@ export default function BatchDetailModal({ batch, files, onClose }: BatchDetailM
               <h2 className="text-base font-semibold text-[var(--color-text-main)]">
                 Batch Details
               </h2>
-              <p className="text-xs text-[var(--color-text-muted)] font-mono mt-0.5">{batch.id}</p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <p className="text-xs text-[var(--color-text-muted)] font-mono">{batch.id}</p>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(batch.id);
+                  }}
+                  className="text-[var(--color-text-muted)] hover:text-[var(--color-text-main)] transition-colors"
+                  title={t("batchDetailCopyId")}
+                >
+                  <span className="material-symbols-outlined text-[12px]">content_copy</span>
+                </button>
+              </div>
             </div>
           </div>
           <button
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t("batchDetailClose")}
             className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-bg-alt)] transition-colors"
           >
             <span className="material-symbols-outlined text-[20px]">close</span>
@@ -186,11 +210,11 @@ export default function BatchDetailModal({ batch, files, onClose }: BatchDetailM
               </span>
               <StatusBadge batch={batch} />
             </div>
-            <Field label="Endpoint" value={batch.endpoint} />
-            {batch.model && <Field label="Model" value={batch.model} />}
-            <Field label="Window" value={batch.completionWindow} />
+            <Field label={t("batchDetailEndpoint")} value={batch.endpoint} />
+            {batch.model && <Field label={t("batchDetailModel")} value={batch.model} />}
+            <Field label={t("batchDetailWindow")} value={batch.completionWindow} />
             <Field
-              label="Created"
+              label={t("batchDetailCreated")}
               value={<span title={formatTs(batch.createdAt)}>{relativeTime(batch.createdAt)}</span>}
             />
           </div>
@@ -298,7 +322,8 @@ export default function BatchDetailModal({ batch, files, onClose }: BatchDetailM
                         </span>
                       )}
                       <a
-                        href={`/api/files/${fileId}/content`}
+                        href={`/api/v1/files/${fileId}/content`}
+                        download={record?.filename || fileId}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text-main)] transition-colors"

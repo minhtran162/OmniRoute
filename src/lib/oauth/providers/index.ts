@@ -21,8 +21,10 @@ import { github } from "./github";
 import { gitlabDuo } from "./gitlab-duo";
 import { kiro } from "./kiro";
 import { cursor } from "./cursor";
+import { trae } from "./trae";
 import { kilocode } from "./kilocode";
 import { cline } from "./cline";
+import { windsurf } from "./windsurf";
 
 export const PROVIDERS = {
   claude,
@@ -37,8 +39,12 @@ export const PROVIDERS = {
   kiro,
   "amazon-q": kiro,
   cursor,
+  trae,
   kilocode,
   cline,
+  windsurf,
+  // devin-cli shares the same token format as windsurf (WINDSURF_API_KEY / devin auth login)
+  "devin-cli": windsurf,
 };
 
 export default PROVIDERS;

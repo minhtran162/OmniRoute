@@ -8,6 +8,8 @@ export const ROUTING_STRATEGY_VALUES = [
   "random",
   "least-used",
   "cost-optimized",
+  "reset-aware",
+  "reset-window",
   "strict-random",
   "auto",
   "lkgp",
@@ -22,6 +24,8 @@ export const AUTO_ROUTING_STRATEGY_VALUES = [
   "eco",
   "latency",
   "fast",
+  "sla-aware",
+  "sla",
   "lkgp",
 ] as const;
 
@@ -46,6 +50,7 @@ export function normalizeRoutingStrategy(value: unknown): RoutingStrategyValue {
   const normalized = value.trim().toLowerCase();
   if (normalized === "usage") return "least-used";
   if (normalized === "context") return "context-optimized";
+  if (normalized === "weekly-reset" || normalized === "reset-window-order") return "reset-window";
   return (ROUTING_STRATEGY_VALUES as readonly string[]).includes(normalized)
     ? (normalized as RoutingStrategyValue)
     : "priority";
@@ -122,6 +127,20 @@ export const ROUTING_STRATEGIES: RoutingStrategyOption[] = [
     combosDescKey: "costOptimizedDesc",
     settingsDescKey: "costOptDesc",
     icon: "savings",
+  },
+  {
+    value: "reset-aware",
+    labelKey: "resetAware",
+    combosDescKey: "resetAwareDesc",
+    settingsDescKey: "resetAwareDesc",
+    icon: "event_repeat",
+  },
+  {
+    value: "reset-window",
+    labelKey: "resetWindow",
+    combosDescKey: "resetWindowDesc",
+    settingsDescKey: "resetWindowDesc",
+    icon: "schedule",
   },
   {
     value: "strict-random",

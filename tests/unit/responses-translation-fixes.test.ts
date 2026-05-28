@@ -207,15 +207,20 @@ test("Responses→Chat: built-in tool_choice type throws unsupported error", () 
   );
 });
 
-test("Responses→Chat: web_search tool type throws unsupported error", () => {
+// After #2695, the web_search server-tool family (web_search, web_search_preview,
+// web_search_20250305, etc.) is allowed in the Responses API translator. Tools
+// that still must be rejected are exercised by the file_search / computer / mcp
+// cases below — keep one representative `file_search` assertion here so a
+// regression that re-allows arbitrary tool types is still caught.
+test("Responses→Chat: file_search tool type throws unsupported error (no web_search regression)", () => {
   const body = {
     model: "gpt-4",
-    input: "search for cats",
-    tools: [{ type: "web_search", search_context_size: "medium" }],
+    input: "search documents",
+    tools: [{ type: "file_search" }],
   };
   assert.throws(
     () => openaiResponsesToOpenAIRequest(null, body, null, null),
-    (err) => (err as any).message.includes("web_search")
+    (err) => (err as any).message.includes("file_search")
   );
 });
 
@@ -406,7 +411,7 @@ test("Responses→Chat streaming: reasoning delta emits reasoning_content in Cha
   };
   const result = openaiResponsesToOpenAIResponse(chunk, state);
   assert.ok(result, "should return a chunk");
-  assert.equal(result.choices[0].delta.reasoning.summary, "thinking step...");
+  assert.equal(result.choices[0].delta.reasoning_content, "thinking step...");
 });
 
 test("Responses→Chat streaming: Copilot mode emits reasoning_text for summary deltas", () => {

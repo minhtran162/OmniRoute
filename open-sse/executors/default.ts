@@ -1,7 +1,12 @@
-import { BaseExecutor } from "./base.ts";
+import { BaseExecutor, setUserAgentHeader } from "./base.ts";
 import { PROVIDERS, OAUTH_ENDPOINTS } from "../config/constants.ts";
 import { getAccessToken } from "../services/tokenRefresh.ts";
-import { getRotatingApiKey } from "../services/apiKeyRotator.ts";
+import {
+  getRotatingApiKey,
+  getValidApiKey,
+  resolveKeyForRequest,
+} from "../services/apiKeyRotator.ts";
+import type { KeyHealth } from "../services/apiKeyRotator.ts";
 import {
   buildClaudeCodeCompatibleHeaders,
   CLAUDE_CODE_COMPATIBLE_DEFAULT_CHAT_PATH,
@@ -11,6 +16,7 @@ import { getGigachatAccessToken } from "../services/gigachatAuth.ts";
 import { getRegistryEntry } from "../config/providerRegistry.ts";
 import { applyProviderRequestDefaults } from "../services/providerRequestDefaults.ts";
 import {
+  detectFormat,
   getOpenAICompatibleType,
   getTargetFormat,
   isClaudeCodeCompatible,
@@ -18,7 +24,6 @@ import {
 import { sanitizeQwenThinkingToolChoice } from "../services/qwenThinking.ts";
 import { buildDataRobotChatUrl } from "../config/datarobot.ts";
 import { buildAzureAiChatUrl } from "../config/azureAi.ts";
-import { buildBedrockChatUrl } from "../config/bedrock.ts";
 import { buildWatsonxChatUrl } from "../config/watsonx.ts";
 import { buildOciChatUrl } from "../config/oci.ts";
 import { buildSapChatUrl, getSapResourceGroup } from "../config/sap.ts";
@@ -31,7 +36,7 @@ function normalizeBaseUrl(baseUrl) {
 function normalizeBailianMessagesUrl(baseUrl) {
   const normalized = normalizeBaseUrl(baseUrl).replace(/\?beta=true$/, "");
   const messagesUrl = normalized.endsWith("/messages") ? normalized : `${normalized}/messages`;
-  return `${messagesUrl}?beta=true`;
+  return messagesUrl;
 }
 
 function normalizeHerokuChatUrl(baseUrl) {
@@ -147,22 +152,26 @@ export class DefaultExecutor extends BaseExecutor {
         return normalizeDataRobotChatUrl(baseUrl);
       }
       case "azure-ai": {
+        const forceResponses =
+          credentials?.providerSpecificData?._omnirouteForceResponsesUpstream === true;
         const apiType =
-          credentials?.providerSpecificData?.apiType === "responses" ? "responses" : "chat";
+          forceResponses || credentials?.providerSpecificData?.apiType === "responses"
+            ? "responses"
+            : "chat";
         const baseUrl = credentials?.providerSpecificData?.baseUrl || this.config.baseUrl;
         return normalizeAzureAiChatUrl(baseUrl, apiType);
-      }
-      case "bedrock": {
-        const baseUrl = credentials?.providerSpecificData?.baseUrl || this.config.baseUrl;
-        return buildBedrockChatUrl(baseUrl);
       }
       case "watsonx": {
         const baseUrl = credentials?.providerSpecificData?.baseUrl || this.config.baseUrl;
         return normalizeWatsonxChatUrl(baseUrl);
       }
       case "oci": {
+        const forceResponses =
+          credentials?.providerSpecificData?._omnirouteForceResponsesUpstream === true;
         const apiType =
-          credentials?.providerSpecificData?.apiType === "responses" ? "responses" : "chat";
+          forceResponses || credentials?.providerSpecificData?.apiType === "responses"
+            ? "responses"
+            : "chat";
         const baseUrl = credentials?.providerSpecificData?.baseUrl || this.config.baseUrl;
         return normalizeOciChatUrl(baseUrl, apiType);
       }
@@ -225,7 +234,7 @@ export class DefaultExecutor extends BaseExecutor {
     }
   }
 
-  buildHeaders(credentials, stream = true) {
+  buildHeaders(credentials, stream = true, clientHeaders?: Record<string, string> | null) {
     const headers = { "Content-Type": "application/json", ...this.config.headers };
 
     // Allow per-provider User-Agent override via environment variable.
@@ -244,10 +253,22 @@ export class DefaultExecutor extends BaseExecutor {
     // T07: resolve extra keys round-robin locally since DefaultExecutor overrides BaseExecutor buildHeaders
     const extraKeys =
       (credentials.providerSpecificData?.extraApiKeys as string[] | undefined) ?? [];
-    const effectiveKey =
-      extraKeys.length > 0 && credentials.connectionId && credentials.apiKey
-        ? getRotatingApiKey(credentials.connectionId, credentials.apiKey, extraKeys)
-        : credentials.apiKey;
+    const selectedKeyId = (credentials.providerSpecificData as Record<string, unknown> | undefined)
+      ?.selectedKeyId as string | undefined;
+    let effectiveKey = credentials.apiKey;
+    if (extraKeys.length > 0 && credentials.connectionId && credentials.apiKey) {
+      const resolved = resolveKeyForRequest(
+        credentials.connectionId,
+        credentials.apiKey,
+        extraKeys,
+        selectedKeyId ?? null
+      );
+      effectiveKey = resolved?.key ?? credentials.apiKey;
+      if (resolved && credentials.providerSpecificData) {
+        (credentials.providerSpecificData as Record<string, unknown>).selectedKeyId =
+          resolved.keyId;
+      }
+    }
 
     switch (this.provider) {
       case "gemini":
@@ -379,6 +400,30 @@ export class DefaultExecutor extends BaseExecutor {
       }
     }
 
+    // Forward client request metadata headers (from OpenCode or similar clients)
+    // Allowlist-based: only specific x-opencode-* headers and User-Agent are forwarded
+    if (clientHeaders) {
+      const clientUA = clientHeaders["User-Agent"] || clientHeaders["user-agent"];
+      if (clientUA) {
+        setUserAgentHeader(headers, clientUA);
+      }
+
+      const opencodeHeaderKeys = [
+        "x-opencode-session",
+        "x-opencode-request",
+        "x-opencode-project",
+        "x-opencode-client",
+      ];
+      for (const headerName of opencodeHeaderKeys) {
+        const value = Object.entries(clientHeaders).find(
+          ([key]) => key.toLowerCase() === headerName.toLowerCase()
+        )?.[1];
+        if (value) {
+          headers[headerName] = value;
+        }
+      }
+    }
+
     return headers;
   }
 
@@ -393,6 +438,11 @@ export class DefaultExecutor extends BaseExecutor {
   transformRequest(model, body, stream, credentials) {
     const cleanedBody = super.transformRequest(model, body, stream, credentials);
     let withDefaults = applyProviderRequestDefaults(cleanedBody, this.config.requestDefaults);
+    const targetFormat = getTargetFormat(this.provider, credentials?.providerSpecificData);
+    const requestFormat =
+      withDefaults && typeof withDefaults === "object" && !Array.isArray(withDefaults)
+        ? detectFormat(withDefaults as Record<string, unknown>)
+        : "openai";
 
     if (typeof withDefaults === "object" && withDefaults !== null && !Array.isArray(withDefaults)) {
       if (this.provider?.startsWith?.("anthropic-compatible-")) {
@@ -401,10 +451,7 @@ export class DefaultExecutor extends BaseExecutor {
           delete withoutStreamOptions.stream_options;
           withDefaults = withoutStreamOptions;
         }
-      } else if (
-        stream &&
-        getTargetFormat(this.provider, credentials?.providerSpecificData) === "openai"
-      ) {
+      } else if (stream && targetFormat === "openai" && requestFormat !== "openai-responses") {
         if (!credentials?.providerSpecificData?.disableStreamOptions) {
           withDefaults = {
             ...withDefaults,
@@ -418,10 +465,17 @@ export class DefaultExecutor extends BaseExecutor {
           delete withoutStreamOptions.stream_options;
           withDefaults = withoutStreamOptions;
         }
+      } else if (
+        (targetFormat === "openai-responses" || requestFormat === "openai-responses") &&
+        Object.prototype.hasOwnProperty.call(withDefaults, "stream_options")
+      ) {
+        const withoutStreamOptions = { ...withDefaults } as Record<string, unknown>;
+        delete withoutStreamOptions.stream_options;
+        withDefaults = withoutStreamOptions;
       }
 
       // #1961: Map max_tokens -> max_completion_tokens for recent OpenAI models
-      if (getTargetFormat(this.provider, credentials?.providerSpecificData) === "openai") {
+      if (targetFormat === "openai") {
         const isRecentOpenAI = /^(o1|o3|o4|gpt-5)/i.test(model);
         if (isRecentOpenAI && withDefaults && typeof withDefaults === "object") {
           const defaultsRecord = withDefaults as Record<string, unknown>;
@@ -439,6 +493,19 @@ export class DefaultExecutor extends BaseExecutor {
         "QwenExecutor"
       );
     }
+
+    // Apply modelIdPrefix from RegistryEntry (e.g. "accounts/fireworks/models/")
+    // so registry can store short model IDs while the upstream API receives the full path.
+    if (typeof withDefaults === "object" && withDefaults !== null) {
+      const entry = getRegistryEntry(this.provider);
+      if (entry?.modelIdPrefix) {
+        const body = withDefaults as Record<string, unknown>;
+        if (typeof body.model === "string" && !body.model.startsWith(entry.modelIdPrefix)) {
+          body.model = `${entry.modelIdPrefix}${body.model}`;
+        }
+      }
+    }
+
     return withDefaults;
   }
 
