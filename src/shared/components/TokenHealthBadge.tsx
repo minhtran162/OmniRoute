@@ -74,26 +74,26 @@ export default function TokenHealthBadge() {
             backdropFilter: "blur(12px)",
           }}
         >
-          <p className="text-xs font-medium text-text-main mb-2">{t("tokenHealth")}</p>
+          <p className="text-xs font-medium text-text-muted mb-2">{t("tokenHealth")}</p>
           <div className="flex flex-col gap-1 text-xs">
             <div className="flex justify-between">
               <span className="text-text-muted">{t("totalOAuth")}</span>
-              <span className="text-text-main">{health.total}</span>
+              <span className="text-text-muted">{health.total}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-emerald-400">{t("healthy")}</span>
-              <span className="text-text-main">{health.healthy}</span>
+              <span className="text-text-muted">{health.healthy}</span>
             </div>
             {health.errored > 0 && (
               <div className="flex justify-between">
                 <span className="text-red-400">{t("errored")}</span>
-                <span className="text-text-main">{health.errored}</span>
+                <span className="text-text-muted">{health.errored}</span>
               </div>
             )}
             {health.warning > 0 && (
               <div className="flex justify-between">
                 <span className="text-amber-400">{t("warning")}</span>
-                <span className="text-text-main">{health.warning}</span>
+                <span className="text-text-muted">{health.warning}</span>
               </div>
             )}
             {health.lastCheckAt && (

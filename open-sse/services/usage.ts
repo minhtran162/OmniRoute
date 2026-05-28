@@ -1457,24 +1457,20 @@ async function getGeminiUsage(
     const data = await response.json();
     const quotas: Record<string, UsageQuota> = {};
 
-    const dataRecord = toRecord(data);
-    if (Array.isArray(dataRecord.buckets)) {
-      for (const bucketValue of dataRecord.buckets) {
-        const bucket = toRecord(bucketValue);
+    if (Array.isArray(data.buckets)) {
+      for (const bucket of data.buckets) {
         if (!bucket.modelId || bucket.remainingFraction == null) continue;
 
-        const remainingFraction = toNumber(bucket.remainingFraction, 0);
-        const remainingPercentage = remainingFraction * 100;
-        const QUOTA_NORMALIZED_BASE = 1000;
-        const total = QUOTA_NORMALIZED_BASE;
+        const remainingFraction = Number(bucket.remainingFraction) || 0;
+        const total = 1000; // Normalized base, matches antigravity convention
         const remaining = Math.round(total * remainingFraction);
         const used = Math.max(0, total - remaining);
 
-        quotas[String(bucket.modelId)] = {
+        quotas[bucket.modelId] = {
           used,
           total,
           resetAt: parseResetTime(bucket.resetTime),
-          remainingPercentage,
+          remainingPercentage: remainingFraction * 100,
           unlimited: false,
         };
       }
@@ -1542,11 +1538,6 @@ function getGeminiCliPlanLabel(subscriptionInfo: unknown): string {
 // Key: truncated accessToken → { data, fetchedAt }
 const _antigravitySubCache = new Map<string, SubscriptionCacheEntry>();
 const ANTIGRAVITY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-const ANTIGRAVITY_MODELS_CACHE_TTL_MS = 60 * 1000;
-const ANTIGRAVITY_CREDIT_PROBE_TTL_MS = 5 * 60 * 1000;
-const _antigravityAvailableModelsCache = new Map<string, { data: unknown; fetchedAt: number }>();
-const _antigravityAvailableModelsInflight = new Map<string, Promise<unknown>>();
-const _antigravityCreditProbeCache = new Map<string, { data: number | null; fetchedAt: number }>();
 const _antigravityCreditProbeInflight = new Map<string, Promise<number | null>>();
 
 interface AntigravityUsageOptions {
@@ -1560,22 +1551,8 @@ function buildAntigravityUsageCacheKey(accessToken: string, projectId?: string |
 async function fetchAntigravityAvailableModelsCached(
   accessToken: string,
   projectId?: string | null,
-  options: AntigravityUsageOptions = {}
 ): Promise<unknown> {
   if (!accessToken) throw new Error("Access token is required");
-
-  const cacheKey = buildAntigravityUsageCacheKey(accessToken, projectId);
-  const cached = _antigravityAvailableModelsCache.get(cacheKey);
-  if (
-    !options.forceRefresh &&
-    cached &&
-    Date.now() - cached.fetchedAt < ANTIGRAVITY_MODELS_CACHE_TTL_MS
-  ) {
-    return cached.data;
-  }
-
-  const inflight = _antigravityAvailableModelsInflight.get(cacheKey);
-  if (inflight) return inflight;
 
   const promise = (async () => {
     let response: Response | null = null;
@@ -1611,13 +1588,10 @@ async function fetchAntigravityAvailableModelsCached(
     }
 
     const data = await response.json();
-    _antigravityAvailableModelsCache.set(cacheKey, { data, fetchedAt: Date.now() });
+    // _antigravityAvailableModelsCache.set(cacheKey, { data, fetchedAt: Date.now() });
     return data;
-  })().finally(() => {
-    _antigravityAvailableModelsInflight.delete(cacheKey);
-  });
+  })();
 
-  _antigravityAvailableModelsInflight.set(cacheKey, promise);
   return promise;
 }
 
@@ -1733,21 +1707,11 @@ function getAntigravityPlanLabel(subscriptionInfo: unknown, fallbackInfo?: unkno
 async function probeAntigravityCreditBalance(
   accessToken: string,
   accountId: string,
-  projectId?: string | null,
-  options: AntigravityUsageOptions = {},
-  providerSpecificData: JsonRecord = {}
+  projectId?: string | null
 ): Promise<number | null> {
   if (!accessToken) return null;
 
   const cacheKey = buildAntigravityUsageCacheKey(accessToken, projectId || accountId);
-  const cached = _antigravityCreditProbeCache.get(cacheKey);
-  if (
-    !options.forceRefresh &&
-    cached &&
-    Date.now() - cached.fetchedAt < ANTIGRAVITY_CREDIT_PROBE_TTL_MS
-  ) {
-    return cached.data;
-  }
 
   const inflight = _antigravityCreditProbeInflight.get(cacheKey);
   if (inflight) return inflight;
@@ -1756,65 +1720,42 @@ async function probeAntigravityCreditBalance(
     accessToken,
     accountId,
     projectId,
-    providerSpecificData
   )
     .then(
       (data) => {
-        _antigravityCreditProbeCache.set(cacheKey, { data, fetchedAt: Date.now() });
         return data;
       },
       (error) => {
-        _antigravityCreditProbeCache.set(cacheKey, { data: null, fetchedAt: Date.now() });
         throw error;
       }
-    )
-    .finally(() => {
-      _antigravityCreditProbeInflight.delete(cacheKey);
-    });
-
-  _antigravityCreditProbeInflight.set(cacheKey, promise);
+    )  
   return promise;
 }
 
 async function probeAntigravityCreditBalanceUncached(
   accessToken: string,
   accountId: string,
-  projectId?: string | null,
-  providerSpecificData: JsonRecord = {}
+  projectId?: string | null
 ): Promise<number | null> {
   try {
     if (!projectId) return null;
 
     // Try all base URLs (some accounts only work with specific endpoints)
     for (const baseUrl of ANTIGRAVITY_BASE_URLS) {
-      const url = `${baseUrl}/v1internal:streamGenerateContent?alt=sse`;
-
-      const sessionId = getAntigravitySessionId({ connectionId: accountId, projectId });
-      const body = {
-        project: projectId,
-        model: "gemini-2-flash",
-        userAgent: "antigravity",
-        requestType: "agent",
-        requestId: generateAntigravityRequestId(),
-        enabledCreditTypes: ["GOOGLE_ONE_AI"],
-        request: {
-          model: "gemini-2-flash",
-          contents: [{ role: "user", parts: [{ text: "hi" }] }],
-          generationConfig: { maxOutputTokens: 1 },
-          sessionId,
-        },
-      };
+      const url = `${baseUrl}/v1internal:fetchAvailableModels`;
+      const body = JSON.stringify({
+          ...(projectId ? { project: projectId } : {})
+        });
 
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "text/event-stream",
+        "Authorization": `Bearer ${accessToken}`,
+        "Accept": "text/event-stream",
+        "User-Agent": ANTIGRAVITY_CONFIG.userAgent,
+        "X-Client-Name": "antigravity",
+        "X-Client-Version": "1.107.0",
+        "x-request-source": "local",
       };
-      applyAntigravityClientProfileHeaders(
-        headers,
-        { connectionId: accountId, projectId, providerSpecificData },
-        body
-      );
 
       try {
         const res = await fetch(url, {
@@ -1823,7 +1764,7 @@ async function probeAntigravityCreditBalanceUncached(
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(10_000),
         });
-
+        
         if (!res.ok) continue;
 
         // Read the full SSE response and scan for remainingCredits
@@ -1908,21 +1849,13 @@ async function getAntigravityUsage(
     const accountId: string = connectionId || "unknown";
 
     // Read cached credit balance (hydrated from DB on first access)
-    let creditBalance = getAntigravityRemainingCredits(accountId);
-
-    // If no cached balance and credits mode is enabled, fire a minimal probe
-    const creditsMode = getCreditsMode();
-    if ((options.forceRefresh || creditBalance === null) && creditsMode !== "off") {
-      creditBalance = await probeAntigravityCreditBalance(
-        accessToken,
-        accountId,
-        projectId,
-        options,
-        providerSpecificData || {}
-      );
-    }
-
-    const data = await fetchAntigravityAvailableModelsCached(accessToken, projectId, options);
+    let creditBalance = await probeAntigravityCreditBalance(
+      accessToken,
+      accountId,
+      projectId
+    );
+    
+    const data = await fetchAntigravityAvailableModelsCached(accessToken, projectId);
     const dataObj = toRecord(data);
     if (dataObj.__antigravityForbidden === true) {
       return { message: "Antigravity access forbidden. Check subscription." };
@@ -2347,67 +2280,154 @@ async function getCodexUsage(
 /**
  * Kiro (AWS CodeWhisperer) Usage
  */
-async function getKiroUsage(accessToken?: string, providerSpecificData?: JsonRecord) {
-  try {
-    const profileArn = providerSpecificData?.profileArn;
-    if (!profileArn) {
-      return { message: "Kiro connected. Profile ARN not available for quota tracking." };
-    }
+async function getKiroUsage(accessToken, providerSpecificData) {
+  const DEFAULT_PROFILE_ARN = "arn:aws:codewhisperer:us-east-1:638616132270:profile/AAAACCCCXXXX";
+  const profileArn = providerSpecificData?.profileArn || DEFAULT_PROFILE_ARN;
+  const authMethod = providerSpecificData?.authMethod || "builder-id";
 
-    // Kiro uses AWS CodeWhisperer GetUsageLimits API
-    const payload = {
-      origin: "AI_EDITOR",
-      profileArn: profileArn,
-      resourceType: "AGENTIC_REQUEST",
+  const getUsageParams = new URLSearchParams({
+    isEmailRequired: "true",
+    origin: "AI_EDITOR",
+    resourceType: "AGENTIC_REQUEST",
+  });
+
+  const attempts = [
+    {
+      name: "codewhisperer-get",
+      run: async () =>
+        fetch(
+          `https://codewhisperer.us-east-1.amazonaws.com/getUsageLimits?${getUsageParams.toString()}`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              Accept: "application/json",
+              "x-amz-user-agent": "aws-sdk-js/1.0.0 KiroIDE",
+              "user-agent": "aws-sdk-js/1.0.0 KiroIDE",
+            },
+          }
+        ),
+    },
+    {
+      name: "codewhisperer-post",
+      run: async () =>
+        fetch("https://codewhisperer.us-east-1.amazonaws.com", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/x-amz-json-1.0",
+            "x-amz-target": "AmazonCodeWhispererService.GetUsageLimits",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            origin: "AI_EDITOR",
+            profileArn,
+            resourceType: "AGENTIC_REQUEST",
+          }),
+        }),
+    },
+    {
+      name: "q-get",
+      run: async () => {
+        const params = new URLSearchParams({
+          origin: "AI_EDITOR",
+          profileArn,
+          resourceType: "AGENTIC_REQUEST",
+        });
+        return fetch(`https://q.us-east-1.amazonaws.com/getUsageLimits?${params}`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json",
+          },
+        });
+      },
+    },
+  ];
+
+  let sawAuthError = false;
+  const errors = [];
+
+  for (const attempt of attempts) {
+    try {
+      const response = await attempt.run();
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        if (response.status === 401 || response.status === 403) {
+          sawAuthError = true;
+        }
+        errors.push(`${attempt.name}:${response.status}${errorText ? `:${errorText}` : ""}`);
+        continue;
+      }
+
+      const data = await response.json();
+
+      return parseKiroQuotaData(data);
+    } catch (error) {
+      errors.push(`${attempt.name}:${(error as Error).message}`);
+    }
+  }
+
+  if (sawAuthError && authMethod === "idc") {
+    return {
+      message:
+        "Kiro quota API is unavailable for the current AWS IAM Identity Center session. Chat may still work. If this persists after renewing your session, reconnect Kiro.",
+      quotas: {},
+    };
+  }
+
+  if (sawAuthError && (authMethod === "google" || authMethod === "github")) {
+    return {
+      message: "Kiro quota API authentication expired. Chat may still work.",
+      quotas: {},
+    };
+  }
+
+  if (sawAuthError) {
+    return {
+      message: "Kiro quota API rejected the current token. Chat may still work.",
+      quotas: {},
+    };
+  }
+
+  const fallbackMessage =
+    errors.length > 0
+      ? `Unable to fetch Kiro usage right now. (${errors[errors.length - 1]})`
+      : "Unable to fetch Kiro usage right now.";
+
+  return {
+    message: fallbackMessage,
+    quotas: {},
+  };
+}
+
+function parseKiroQuotaData(data) {
+  const usageList = data.usageBreakdownList || [];
+  const quotaInfo = {};
+
+  const resetAtTimestamp = data.nextDateReset || data.resetDate;
+  const resetAt =
+    resetAtTimestamp && typeof resetAtTimestamp === "number"
+      ? new Date(resetAtTimestamp * 1000).toISOString()
+      : null;
+
+  usageList.forEach((breakdown) => {
+    const resourceType = breakdown.resourceType?.toLowerCase() || "unknown";
+    const used = breakdown.currentUsageWithPrecision || 0;
+    const total = breakdown.usageLimitWithPrecision || 0;
+
+    quotaInfo[resourceType] = {
+      used,
+      total,
+      remaining: total - used,
+      resetAt,
+      unlimited: false,
     };
 
-    const response = await fetch(CODEWHISPERER_BASE_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/x-amz-json-1.0",
-        "x-amz-target": "AmazonCodeWhispererService.GetUsageLimits",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Kiro API error (${response.status}): ${errorText}`);
-    }
-
-    const data = toRecord(await response.json());
-
-    // Parse usage data from usageBreakdownList
-    const usageList = Array.isArray(data.usageBreakdownList) ? data.usageBreakdownList : [];
-    const quotaInfo: Record<string, UsageQuota> = {};
-
-    // Parse reset time - supports multiple formats (nextDateReset, resetDate, etc.)
-    const resetAt = parseResetTime(data.nextDateReset || data.resetDate);
-
-    usageList.forEach((breakdownValue: unknown) => {
-      const breakdown = toRecord(breakdownValue);
-      const resourceType =
-        typeof breakdown.resourceType === "string"
-          ? breakdown.resourceType.toLowerCase()
-          : "unknown";
-      const used = toNumber(breakdown.currentUsageWithPrecision, 0);
-      const total = toNumber(breakdown.usageLimitWithPrecision, 0);
-
-      quotaInfo[resourceType] = {
-        used,
-        total,
-        remaining: total - used,
-        resetAt,
-        unlimited: false,
-      };
-
-      // Add free trial if available
-      const freeTrialInfo = toRecord(breakdown.freeTrialInfo);
-      if (Object.keys(freeTrialInfo).length > 0) {
-        const freeUsed = toNumber(freeTrialInfo.currentUsageWithPrecision, 0);
-        const freeTotal = toNumber(freeTrialInfo.usageLimitWithPrecision, 0);
+    if (breakdown.freeTrialInfo && Array.isArray(breakdown.freeTrialInfo)) {
+      for (const freeTrialItem of breakdown.freeTrialInfo) {
+        const freeUsed = freeTrialItem.currentUsageWithPrecision || 0;
+        const freeTotal = freeTrialItem.usageLimitWithPrecision || 0;
 
         quotaInfo[`${resourceType}_freetrial`] = {
           used: freeUsed,
@@ -2417,15 +2437,24 @@ async function getKiroUsage(accessToken?: string, providerSpecificData?: JsonRec
           unlimited: false,
         };
       }
-    });
+    } else if (breakdown.freeTrialInfo && typeof breakdown.freeTrialInfo === "object") {
+      const freeUsed = breakdown.freeTrialInfo.currentUsageWithPrecision || 0;
+      const freeTotal = breakdown.freeTrialInfo.usageLimitWithPrecision || 0;
 
-    return {
-      plan: String(toRecord(data.subscriptionInfo).subscriptionTitle || "").trim() || "Kiro",
-      quotas: quotaInfo,
-    };
-  } catch (error) {
-    throw new Error(`Failed to fetch Kiro usage: ${error.message}`);
-  }
+      quotaInfo[`${resourceType}_freetrial`] = {
+        used: freeUsed,
+        total: freeTotal,
+        remaining: freeTotal - freeUsed,
+        resetAt,
+        unlimited: false,
+      };
+    }
+  });
+
+  return {
+    plan: data.subscriptionInfo?.subscriptionTitle || "Kiro Pro",
+    quotas: quotaInfo,
+  };
 }
 
 /**
