@@ -97,13 +97,16 @@ test("movePath rethrows non-EXDEV rename failures", async () => {
 test("resolveNextBuildEnv forces stable build worker mode unless already provided", () => {
   const defaultEnv = resolveNextBuildEnv({ NODE_ENV: "test" });
   assert.equal(defaultEnv.NEXT_PRIVATE_BUILD_WORKER, "0");
+  assert.equal(defaultEnv.NEXT_TELEMETRY_DISABLED, "1");
   assert.equal(defaultEnv.NODE_ENV, "test");
 
   const preservedEnv = resolveNextBuildEnv({
     NODE_ENV: "production",
     NEXT_PRIVATE_BUILD_WORKER: "1",
+    NEXT_TELEMETRY_DISABLED: "0",
   });
   assert.equal(preservedEnv.NEXT_PRIVATE_BUILD_WORKER, "1");
+  assert.equal(preservedEnv.NEXT_TELEMETRY_DISABLED, "0");
   assert.equal(preservedEnv.NODE_ENV, "production");
 });
 

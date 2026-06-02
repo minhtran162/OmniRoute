@@ -39,7 +39,11 @@ RUN --mount=type=cache,target=/root/.npm \
   && node -e "require('better-sqlite3')(':memory:').close()"
 
 # Use Turbopack for significant build speedup
-ENV OMNIROUTE_USE_TURBOPACK=1
+ARG OMNIROUTE_USE_TURBOPACK=0
+ARG OMNIROUTE_BUILD_NODE_OPTIONS="--max-old-space-size=4096"
+ENV OMNIROUTE_USE_TURBOPACK=${OMNIROUTE_USE_TURBOPACK} \
+  NEXT_TELEMETRY_DISABLED=1 \
+  NODE_OPTIONS=${OMNIROUTE_BUILD_NODE_OPTIONS}
 
 COPY . ./
 RUN --mount=type=cache,target=/app/.next/cache \
@@ -121,6 +125,10 @@ FROM runner-base AS runner-web
 
 USER root
 
+# Explicitly copy playwright — needed for browser installation
+COPY --from=builder /app/node_modules/playwright /app/node_modules/playwright
+COPY --from=builder /app/node_modules/playwright-core /app/node_modules/playwright-core
+
 # Install Playwright browser binaries + OS dependencies under root, then hand
 # ownership of the browsers cache to the node user.
 # PLAYWRIGHT_BROWSERS_PATH overrides the default ~/.cache/ms-playwright so the
@@ -130,29 +138,8 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/home/node/.cache/ms-playwright
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
   apt-get update \
-  && npx playwright install chromium --with-deps \
+  && node /app/node_modules/playwright/cli.js install chromium --with-deps \
   && chown -R node:node /home/node/.cache \
   && rm -rf /var/lib/apt/lists/*
-
-USER node
-
-FROM runner-base AS runner-cli
-
-# Drop back to root briefly so we can install system + global npm packages,
-# then return to the `node` non-root user before the CMD inherited from
-# runner-base runs.
-USER root
-
-# Install system dependencies required by openclaw (git+ssh references).
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-  --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-  apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates docker.io docker-compose \
-  && rm -rf /var/lib/apt/lists/* \
-  && git config --system url."https://github.com/".insteadOf "ssh://git@github.com/"
-
-# Install CLI tools globally. Separate layer from apt for better cache reuse.
-RUN --mount=type=cache,target=/root/.npm \
-  npm install -g --no-audit --no-fund @openai/codex @anthropic-ai/claude-code droid openclaw@latest
 
 USER node

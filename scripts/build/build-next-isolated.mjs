@@ -50,6 +50,11 @@ async function exists(targetPath) {
   }
 }
 
+/**
+ * @param {string} sourcePath
+ * @param {string} destinationPath
+ * @param {Pick<typeof fs, "mkdir" | "rename" | "cp" | "rm">} [fsImpl]
+ */
 export async function movePath(sourcePath, destinationPath, fsImpl = fs) {
   const mkdir = typeof fsImpl.mkdir === "function" ? fsImpl.mkdir.bind(fsImpl) : fs.mkdir.bind(fs);
   await mkdir(path.dirname(destinationPath), { recursive: true });
@@ -109,6 +114,7 @@ export function resolveNextBuildBundlerFlag(baseEnv = process.env) {
 export function resolveNextBuildEnv(baseEnv = process.env) {
   return {
     ...baseEnv,
+    NEXT_TELEMETRY_DISABLED: baseEnv.NEXT_TELEMETRY_DISABLED || "1",
     NEXT_PRIVATE_BUILD_WORKER: baseEnv.NEXT_PRIVATE_BUILD_WORKER || "0",
   };
 }
