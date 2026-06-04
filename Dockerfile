@@ -61,7 +61,8 @@ LABEL org.opencontainers.image.title="omniroute" \
 ENV NODE_ENV=production
 ENV PORT=20128
 ENV HOSTNAME=0.0.0.0
-ENV NODE_OPTIONS="--max-old-space-size=256"
+ENV OMNIROUTE_MEMORY_MB=1024
+ENV NODE_OPTIONS="--max-old-space-size=${OMNIROUTE_MEMORY_MB}"
 
 # Data directory inside Docker — must match the volume mount in docker-compose.yml
 ENV DATA_DIR=/app/data
@@ -125,10 +126,6 @@ FROM runner-base AS runner-web
 
 USER root
 
-# Explicitly copy playwright — needed for browser installation
-COPY --from=builder /app/node_modules/playwright /app/node_modules/playwright
-COPY --from=builder /app/node_modules/playwright-core /app/node_modules/playwright-core
-
 # Install Playwright browser binaries + OS dependencies under root, then hand
 # ownership of the browsers cache to the node user.
 # PLAYWRIGHT_BROWSERS_PATH overrides the default ~/.cache/ms-playwright so the
@@ -138,8 +135,41 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/home/node/.cache/ms-playwright
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
   apt-get update \
-  && node /app/node_modules/playwright/cli.js install chromium --with-deps \
+  && npx playwright install chromium --with-deps \
   && chown -R node:node /home/node/.cache \
   && rm -rf /var/lib/apt/lists/*
+
+USER node
+
+# ── Runner Web (web-cookie providers: Gemini Web, Claude Turnstile) ───────────
+#
+#  Two image flavors:
+#    runner-base  →  omniroute:VERSION        Lean base (~500 MB). No browsers.
+#    runner-web   →  omniroute:VERSION-web    +Chromium/Playwright (~800 MB).
+#
+#  Use runner-web when you need web-cookie providers (gemini-web, claude-web,
+#  claude-turnstile). For all other providers runner-base is sufficient.
+#
+#  Build:
+#    docker build --target runner-web -t omniroute:web .
+#  Compose:
+#    build:
+#      context: .
+#      target: runner-web
+FROM runner-base AS runner-web
+
+USER root
+
+# Install system dependencies required by openclaw (git+ssh references).
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+  apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates docker.io docker-compose \
+  && rm -rf /var/lib/apt/lists/* \
+  && git config --system url."https://github.com/".insteadOf "ssh://git@github.com/"
+
+# Install CLI tools globally. Separate layer from apt for better cache reuse.
+RUN --mount=type=cache,target=/root/.npm \
+  npm install -g --no-audit --no-fund @openai/codex @anthropic-ai/claude-code droid openclaw@latest
 
 USER node
