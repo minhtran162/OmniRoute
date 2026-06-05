@@ -135,41 +135,13 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/home/node/.cache/ms-playwright
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
   apt-get update \
-  && npx playwright install chromium --with-deps \
+  && apt-get install -y --no-install-recommends curl \
+  && npm install -g playwright \
+  && playwright install chromium --with-deps \
+  && npm uninstall -g playwright \
+  && apt-get purge -y curl \
+  && apt-get autoremove -y \
   && chown -R node:node /home/node/.cache \
   && rm -rf /var/lib/apt/lists/*
-
-USER node
-
-# ── Runner Web (web-cookie providers: Gemini Web, Claude Turnstile) ───────────
-#
-#  Two image flavors:
-#    runner-base  →  omniroute:VERSION        Lean base (~500 MB). No browsers.
-#    runner-web   →  omniroute:VERSION-web    +Chromium/Playwright (~800 MB).
-#
-#  Use runner-web when you need web-cookie providers (gemini-web, claude-web,
-#  claude-turnstile). For all other providers runner-base is sufficient.
-#
-#  Build:
-#    docker build --target runner-web -t omniroute:web .
-#  Compose:
-#    build:
-#      context: .
-#      target: runner-web
-FROM runner-base AS runner-web
-
-USER root
-
-# Install system dependencies required by openclaw (git+ssh references).
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-  --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-  apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates docker.io docker-compose \
-  && rm -rf /var/lib/apt/lists/* \
-  && git config --system url."https://github.com/".insteadOf "ssh://git@github.com/"
-
-# Install CLI tools globally. Separate layer from apt for better cache reuse.
-RUN --mount=type=cache,target=/root/.npm \
-  npm install -g --no-audit --no-fund @openai/codex @anthropic-ai/claude-code droid openclaw@latest
 
 USER node
