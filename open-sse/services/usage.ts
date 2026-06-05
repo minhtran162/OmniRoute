@@ -1902,12 +1902,6 @@ const _usageCacheCleanupTimer = setInterval(() => {
   for (const [key, entry] of _antigravitySubCache) {
     if (now - entry.fetchedAt > ANTIGRAVITY_CACHE_TTL_MS) _antigravitySubCache.delete(key);
   }
-  for (const [key, entry] of _antigravityAvailableModelsCache) {
-    if (now - entry.fetchedAt > ANTIGRAVITY_MODELS_CACHE_TTL_MS) _antigravityAvailableModelsCache.delete(key);
-  }
-  for (const [key, entry] of _antigravityCreditProbeCache) {
-    if (now - entry.fetchedAt > ANTIGRAVITY_CREDIT_PROBE_TTL_MS) _antigravityCreditProbeCache.delete(key);
-  }
 }, 5 * 60 * 1000); // every 5 minutes
 _usageCacheCleanupTimer.unref?.(); // Don't prevent process exit
 

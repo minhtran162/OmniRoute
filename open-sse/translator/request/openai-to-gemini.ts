@@ -780,10 +780,17 @@ export function openaiToAntigravityRequest(model, body, stream, credentials = nu
 register(
   FORMATS.OPENAI,
   FORMATS.GEMINI,
-  (model, body, stream = false, credentials = null) =>
-    openaiToGeminiRequest(model, body, stream, credentials, {
-      signaturelessToolCallMode: "text",
-    }),
+  (model, body, stream = false, credentials = null) => {
+    const modelLower = model.toLowerCase();
+    const isThinkingGemini =
+      modelLower.includes("thinking") ||
+      modelLower.includes("gemini-3") ||
+      modelLower.includes("gemini-2.5") ||
+      modelLower.includes("gemini-pro");
+    return openaiToGeminiRequest(model, body, stream, credentials, {
+      signaturelessToolCallMode: isThinkingGemini ? "context" : "native",
+    });
+  },
   null
 );
 register(

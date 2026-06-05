@@ -2,7 +2,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { T3ChatWebExecutor, T3_CHAT_BASE } = await import("../../open-sse/executors/t3-chat-web.ts");
+const { T3ChatWebExecutor, T3_CHAT_BASE, parseT3Credentials, __setT3TlsFetchOverrideForTesting } =
+  await import("../../open-sse/executors/t3-chat-web.ts");
 const { getExecutor, hasSpecializedExecutor } = await import("../../open-sse/executors/index.ts");
 
 // NOTE: These tests use mocked HTTP transport. The COMPLETION_URL constant in
@@ -91,6 +92,16 @@ test("execute returns 400 with empty apiKey string", async () => {
     signal: AbortSignal.timeout(5000),
   });
   assert.equal(result.response.status, 400);
+});
+
+test("parseT3Credentials strips a pasted Cookie header prefix", () => {
+  const parsed = parseT3Credentials({
+    apiKey: "Cookie: t3-auth=session-token-xyz; other=value; convex-session-id=convex-abc123",
+  });
+
+  assert.equal(parsed.convexSessionId, "convex-abc123");
+  assert.ok(!parsed.cookieHeader.toLowerCase().startsWith("cookie:"));
+  assert.ok(parsed.cookieHeader.includes("convex-session-id=convex-abc123"));
 });
 
 // ─── testConnection ──────────────────────────────────────────────────────
@@ -290,9 +301,10 @@ test("execute: upstream 403 → returns 403 with descriptive message", async () 
   }
 });
 
-test("execute: upstream 429 → returns 429", async () => {
+test("execute: upstream 429 → returns 429 with retry hint", async () => {
   const original = globalThis.fetch;
-  globalThis.fetch = async () => new Response("Too Many Requests", { status: 429 });
+  globalThis.fetch = async () =>
+    new Response("Too Many Requests", { status: 429, headers: { "Retry-After": "15" } });
 
   try {
     const executor = new T3ChatWebExecutor();
@@ -304,7 +316,82 @@ test("execute: upstream 429 → returns 429", async () => {
       signal: AbortSignal.timeout(5000),
     });
     assert.equal(result.response.status, 429);
+    assert.equal(result.response.headers.get("Retry-After"), "15");
+    const body = JSON.parse(await result.response.text());
+    assert.ok(body.error?.message?.includes("rate limited"));
+    assert.ok(body.error?.message?.includes("Retry after 15s"));
+    assert.ok(body.error?.message?.includes("Too Many Requests"));
   } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("execute: upstream Vercel checkpoint 429 → returns bot protection guidance", async () => {
+  const original = globalThis.fetch;
+  const originalTlsFallback = process.env.OMNIROUTE_T3_TLS_FALLBACK;
+  process.env.OMNIROUTE_T3_TLS_FALLBACK = "0";
+  globalThis.fetch = async () =>
+    new Response(
+      "<!DOCTYPE html><html><head><title>Vercel Security Checkpoint</title></head><body>Security Checkpoint</body></html>",
+      { status: 429, headers: { "Content-Type": "text/html; charset=utf-8" } }
+    );
+
+  try {
+    const executor = new T3ChatWebExecutor();
+    const result = await executor.execute({
+      model: "gpt-4o",
+      body: { messages: [{ role: "user", content: "hi" }] },
+      stream: true,
+      credentials: makeValidCreds(),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(result.response.status, 429);
+    const body = JSON.parse(await result.response.text());
+    assert.ok(body.error?.message?.includes("Vercel Security Checkpoint"));
+    assert.ok(body.error?.message?.includes("bot protection"));
+    assert.ok(body.error?.message?.includes("re-paste fresh cookies"));
+    assert.ok(!body.error?.message?.includes("<!DOCTYPE html>"));
+  } finally {
+    if (originalTlsFallback === undefined) {
+      delete process.env.OMNIROUTE_T3_TLS_FALLBACK;
+    } else {
+      process.env.OMNIROUTE_T3_TLS_FALLBACK = originalTlsFallback;
+    }
+    globalThis.fetch = original;
+  }
+});
+
+test("execute: Vercel checkpoint 429 retries once through TLS fallback when available", async () => {
+  const original = globalThis.fetch;
+  let tlsCalls = 0;
+  globalThis.fetch = async () =>
+    new Response(
+      "<!DOCTYPE html><html><head><title>Vercel Security Checkpoint</title></head><body>Security Checkpoint</body></html>",
+      { status: 429, headers: { "Content-Type": "text/html; charset=utf-8" } }
+    );
+  __setT3TlsFetchOverrideForTesting(async () => {
+    tlsCalls++;
+    return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  try {
+    const executor = new T3ChatWebExecutor();
+    const result = await executor.execute({
+      model: "gpt-4o",
+      body: { messages: [{ role: "user", content: "hi" }] },
+      stream: false,
+      credentials: makeValidCreds(),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(tlsCalls, 1);
+    const body = JSON.parse(await result.response.text());
+    assert.equal(body.choices[0].message.content, "ok");
+  } finally {
+    __setT3TlsFetchOverrideForTesting(null);
     globalThis.fetch = original;
   }
 });
