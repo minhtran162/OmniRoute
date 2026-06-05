@@ -46,7 +46,7 @@ ENV OMNIROUTE_USE_TURBOPACK=${OMNIROUTE_USE_TURBOPACK} \
   NODE_OPTIONS=${OMNIROUTE_BUILD_NODE_OPTIONS}
 
 COPY . ./
-RUN --mount=type=cache,target=/app/.next/cache \
+RUN --mount=type=cache,target=/app/.build/next/cache \
   mkdir -p /app/data && npm run build
 
 # ── Runner base ────────────────────────────────────────────────────────────
@@ -69,9 +69,9 @@ ENV DATA_DIR=/app/data
 RUN mkdir -p /app/data
 
 # The standalone build + syncStandaloneExtraModules bundles all runtime files
-# (.next, node_modules, migrations, scripts, docs, etc.) into .next/standalone/.
+# (.next, node_modules, migrations, scripts, docs, etc.) into .build/next/standalone/.
 # Explicit overrides below cover modules that NFT tracing may miss.
-COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.build/next/standalone ./
 # Explicitly copy @swc/helpers — not always traced by standalone output but needed at runtime
 COPY --from=builder /app/node_modules/@swc/helpers ./node_modules/@swc/helpers
 # Explicitly copy better-sqlite3 — native bindings are not reliably traced by

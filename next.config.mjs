@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
-const distDir = process.env.NEXT_DIST_DIR || ".next";
+const distDir = process.env.NEXT_DIST_DIR || ".build/next";
 const projectRoot = dirname(fileURLToPath(import.meta.url));
 const scriptSrc =
   process.env.NODE_ENV === "development"
@@ -104,6 +104,10 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: process.env.OMNIROUTE_SERVER_ACTIONS_BODY_LIMIT || "50mb",
     },
+    // Next.js proxy (middleware) has a default 10MB body clone limit. File
+    // uploads (OpenAI-compatible /v1/files) routinely exceed this. Match the
+    // 512 MB server-side cap; tune via env if needed.
+    proxyClientMaxBodySize: process.env.NEXT_PROXY_BODY_LIMIT || "512mb",
   },
   outputFileTracingRoot: projectRoot,
   outputFileTracingIncludes: {
