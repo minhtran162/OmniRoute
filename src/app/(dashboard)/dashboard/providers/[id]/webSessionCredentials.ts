@@ -22,9 +22,11 @@ export const WEB_SESSION_CREDENTIAL_REQUIREMENTS = {
     acceptsFullCookieHeader: true,
   },
   "grok-web": {
+    // Grok needs BOTH the sso and sso-rw cookies (#3180) — the hint previously named
+    // only `sso`, which read as "paste just sso" and produced anti-bot 403s.
     kind: "cookie",
-    credentialName: "sso",
-    placeholder: "sso=...",
+    credentialName: "sso + sso-rw",
+    placeholder: "sso=...; sso-rw=...",
     acceptsFullCookieHeader: true,
   },
   "gemini-web": {
@@ -134,6 +136,36 @@ export const WEB_SESSION_CREDENTIAL_REQUIREMENTS = {
     credentialName: "token",
     placeholder: "Paste your Qwen token from chat.qwen.ai (Local Storage → token)",
     acceptsFullCookieHeader: false,
+  },
+  "duckduckgo-web": {
+    kind: "cookie",
+    credentialName: "duckai",
+    placeholder: "duckai=... or full Cookie header from duckduckgo.com",
+    acceptsFullCookieHeader: true,
+  },
+  "t3-chat-web": {
+    kind: "token",
+    credentialName: "token",
+    placeholder: "Paste your T3 Chat token from t3.chat (Local Storage → token)",
+    acceptsFullCookieHeader: false,
+  },
+  "chatglm-web": {
+    kind: "cookie",
+    credentialName: "chatglm_session",
+    placeholder: "chatglm_session=... or full Cookie header from chatglm.cn",
+    acceptsFullCookieHeader: true,
+  },
+  "xiaomimimo-web": {
+    kind: "cookie",
+    credentialName: "session",
+    placeholder: "session=... or full Cookie header from aistudio.xiaomimimo.com",
+    acceptsFullCookieHeader: true,
+  },
+  "manus-web": {
+    kind: "cookie",
+    credentialName: "manus_session",
+    placeholder: "manus_session=... or full Cookie header from manus.im",
+    acceptsFullCookieHeader: true,
   },
 } satisfies Record<keyof typeof WEB_COOKIE_PROVIDERS, WebSessionCredentialRequirement>;
 

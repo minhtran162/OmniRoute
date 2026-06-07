@@ -4,6 +4,30 @@
 
 ---
 
+## [3.8.14] — Unreleased
+
+_Development cycle in progress._
+
+---
+
+## [3.8.13] — Unreleased
+
+_Development cycle in progress._
+
+---
+
+## [3.8.12] — Unreleased
+
+_Development cycle in progress._
+
+---
+
+## [3.8.11] — Unreleased
+
+_Development cycle in progress._
+
+---
+
 ## [3.8.10] — Unreleased
 
 ---

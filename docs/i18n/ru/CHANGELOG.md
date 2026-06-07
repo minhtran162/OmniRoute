@@ -4,6 +4,33 @@
 
 ---
 
+<<<<<<< HEAD
+=======
+## [3.8.14] — Unreleased
+
+_Development cycle in progress._
+
+---
+
+## [3.8.13] — Unreleased
+
+_Development cycle in progress._
+
+---
+
+## [3.8.12] — Unreleased
+
+_Development cycle in progress._
+
+---
+
+## [3.8.11] — Unreleased
+
+_Development cycle in progress._
+
+---
+
+>>>>>>> c8031be906dedee9881b2c0cb579213c973365f6
 ## [3.8.10] — Unreleased
 
 ---
