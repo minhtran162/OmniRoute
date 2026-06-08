@@ -168,7 +168,8 @@ async function captureTokenViaBrowser(): Promise<string> {
 
       page.route("**/api/chatgpt", async (route) => {
         clearTimeout(timeout);
-        const t = route.request().headers()["x-request-token"];
+        const headers = route.request().headers();
+        const t = headers["x-request-token"];
         try { await route.abort("blockedbyclient"); } catch {}
         resolve(t);
       });
@@ -177,7 +178,7 @@ async function captureTokenViaBrowser(): Promise<string> {
         try {
           const ta = page.locator("textarea").first();
           await ta.waitFor({ state: "visible", timeout: 10_000 });
-          await ta.click();
+          await ta.click({ force: true });
           await ta.fill("hello");
           await page.waitForTimeout(300);
           await ta.press("Enter");
@@ -238,10 +239,16 @@ async function directFetch(
     return await fetch(API_URL, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "X-Client-Version": "3.8.4",
-        "X-Request-Token": token,
-        "User-Agent": CHROME_UA,
+        "accept": "*/*",
+        "content-type": "application/json",
+        "x-client-version": "3.8.4",
+        "x-request-token": token,
+        "user-agent": CHROME_UA,
+        "origin": API_BASE,
+        "referer": `${API_BASE}/`,
+        "sec-ch-ua": '"Chromium";v="148", "HeadlessChrome";v="148", "Not/A)Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
       },
       body: JSON.stringify(reqBody),
       signal: controller.signal,
