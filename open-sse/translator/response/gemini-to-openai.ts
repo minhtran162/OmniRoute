@@ -4,7 +4,11 @@ import {
   buildGeminiThoughtSignatureKey,
   storeGeminiThoughtSignature,
 } from "../../services/geminiThoughtSignatureStore.ts";
-import { parseTextualToolCallCandidate } from "../../utils/textualToolCall.ts";
+import {
+  parseTextualToolCallCandidate,
+  containsTextualToolCallMarker,
+  isInertHistoricalToolRecord,
+} from "../../utils/textualToolCall.ts";
 
 type GeminiToOpenAIState = {
   functionIndex: number;
@@ -35,17 +39,6 @@ function normalizeToolCallArgs(args: unknown): unknown {
   } catch {
     return args;
   }
-}
-
-function containsTextualToolCallMarker(text: unknown): boolean {
-  if (typeof text !== "string") return false;
-  const normalized = text.replace(/[\u200B-\u200D\uFEFF]/g, "");
-
-  if (!normalized.includes("[Tool call:")) return false;
-  if (normalized.includes("Arguments:")) return true;
-
-  const trimmed = normalized.trim();
-  return trimmed.startsWith("[Tool call:") || trimmed.startsWith("(empty)[Tool call:");
 }
 
 function buildToolCallId(
@@ -89,6 +82,7 @@ function emitFunctionCallPart(
       getSignatureCacheKey(state, toolCall.id),
       state.pendingThoughtSignature
     );
+    state.pendingThoughtSignature = null;
   }
 
   state.toolCalls.set(toolCallIndex, toolCall);
@@ -235,28 +229,27 @@ export function geminiToOpenAIResponse(chunk, state) {
       if (part.text !== undefined && part.text !== "") {
         let accumulated = (state.textualToolCallBuffer || "") + part.text;
 
-        let candidate = null;
-        if (!state.hasEmittedContent || state.textualToolCallBuffer) {
-          candidate = parseTextualToolCallCandidate(accumulated);
+        if (isInertHistoricalToolRecord(accumulated)) {
+          state.textualToolCallBuffer = "";
+          continue;
         }
 
+        let candidate = parseTextualToolCallCandidate(accumulated);
+
         if (candidate) {
-          const normalized = accumulated.replace(/[​-‍﻿]/g, "");
-          let toolCallIndex = normalized.lastIndexOf("[Tool call:");
+          accumulated = accumulated.replace(/[\u200B-\u200D\uFEFF]/g, "");
+          let toolCallIndex = accumulated.lastIndexOf("(empty)[Tool call:");
           if (toolCallIndex < 0) {
-            toolCallIndex = normalized.lastIndexOf("(empty)[Tool call:");
+            toolCallIndex = accumulated.lastIndexOf("[Tool call:");
           }
           if (toolCallIndex < 0) {
-            const lastBracket = normalized.lastIndexOf("[");
-            if (lastBracket !== -1 && "[Tool call:".startsWith(normalized.slice(lastBracket))) {
-              toolCallIndex = lastBracket;
+            const lastParen = accumulated.lastIndexOf("(");
+            if (lastParen !== -1 && "(empty)[Tool call:".startsWith(accumulated.slice(lastParen))) {
+              toolCallIndex = lastParen;
             } else {
-              const lastParen = normalized.lastIndexOf("(");
-              if (
-                lastParen !== -1 &&
-                "(empty)[Tool call:".startsWith(normalized.slice(lastParen))
-              ) {
-                toolCallIndex = lastParen;
+              const lastBracket = accumulated.lastIndexOf("[");
+              if (lastBracket !== -1 && "[Tool call:".startsWith(accumulated.slice(lastBracket))) {
+                toolCallIndex = lastBracket;
               }
             }
           }
@@ -457,33 +450,38 @@ export function geminiToOpenAIResponse(chunk, state) {
     if (state.textualToolCallBuffer) {
       const remainingText = state.textualToolCallBuffer;
       state.textualToolCallBuffer = "";
-      const textualToolCall = parseTextualToolCallCandidate(remainingText);
-      if (textualToolCall && textualToolCall.kind === "complete") {
-        emitFunctionCallPart(
-          {
-            functionCall: {
-              name: textualToolCall.name,
-              args: textualToolCall.args,
-            },
-          },
-          state,
-          results
-        );
-      } else if (state.hasEmittedContent || !containsTextualToolCallMarker(remainingText)) {
-        state.hasEmittedContent = true;
-        results.push({
-          id: `chatcmpl-${state.messageId}`,
-          object: "chat.completion.chunk",
-          created: Math.floor(Date.now() / 1000),
-          model: state.model,
-          choices: [
+      if (isInertHistoricalToolRecord(remainingText)) {
+        // Suppress request-side inert history fallback text. It is only context
+        // for Gemini and must never leak back as assistant output/tool action.
+      } else {
+        const textualToolCall = parseTextualToolCallCandidate(remainingText);
+        if (textualToolCall && textualToolCall.kind === "complete") {
+          emitFunctionCallPart(
             {
-              index: 0,
-              delta: { content: remainingText },
-              finish_reason: null,
+              functionCall: {
+                name: textualToolCall.name,
+                args: textualToolCall.args,
+              },
             },
-          ],
-        });
+            state,
+            results
+          );
+        } else if (state.hasEmittedContent || !containsTextualToolCallMarker(remainingText)) {
+          state.hasEmittedContent = true;
+          results.push({
+            id: `chatcmpl-${state.messageId}`,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: state.model,
+            choices: [
+              {
+                index: 0,
+                delta: { content: remainingText },
+                finish_reason: null,
+              },
+            ],
+          });
+        }
       }
     }
 

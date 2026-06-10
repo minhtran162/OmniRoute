@@ -725,7 +725,11 @@ test("createSSEStream passthrough drops leaked empty chat bootstrap chunks for R
         created: 1,
         model: "gpt-5.4",
         choices: [
-          { index: 0, delta: { role: "assistant", content: null, refusal: null }, finish_reason: null },
+          {
+            index: 0,
+            delta: { role: "assistant", content: null, refusal: null },
+            finish_reason: null,
+          },
         ],
       })}\n\n`,
       `event: response.created\ndata: ${JSON.stringify({
@@ -1656,14 +1660,71 @@ test("createSSEStream passthrough drops empty choices array chunks", async () =>
     }
   );
 
-  // The empty choices chunk should have been dropped entirely
+  // Empty choices WITHOUT usage are DROPPED, never replaced with a synthetic
+  // "[OmniRoute] Upstream returned an empty response. Please retry." chunk. That
+  // injection (reintroduced by #3422) was fed back by clients as a turn and caused
+  // the retry loop #3388/#3502, which #3400 had fixed by dropping the chunk.
   assert.doesNotMatch(text, /\[OmniRoute\] Upstream returned an empty response/);
-  
-  // Subsequent valid chunks should still be present and correctly processed
+  // Subsequent valid chunks must still pass through untouched.
   assert.match(text, /"content":"Hello"/);
   assert.match(text, /"finish_reason":"stop"/);
   assert.equal(onCompletePayload.status, 200);
   assert.equal(onCompletePayload.responseBody.choices[0].message.content, "Hello");
+});
+
+test("createSSEStream passthrough forwards OpenAI usage-only empty choices chunks", async () => {
+  let onCompletePayload = null;
+  const usage = { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 };
+  const text = await readTransformed(
+    [
+      `data: ${JSON.stringify({
+        id: "chatcmpl_usage_only",
+        object: "chat.completion.chunk",
+        created: 1,
+        model: "gpt-4.1-mini",
+        choices: [{ index: 0, delta: { role: "assistant", content: "Hello" } }],
+        usage: null,
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        id: "chatcmpl_usage_only",
+        object: "chat.completion.chunk",
+        created: 1,
+        model: "gpt-4.1-mini",
+        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        usage: null,
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        id: "chatcmpl_usage_only",
+        object: "chat.completion.chunk",
+        created: 1,
+        model: "gpt-4.1-mini",
+        choices: [],
+        usage,
+      })}\n\n`,
+    ],
+    {
+      mode: "passthrough",
+      sourceFormat: FORMATS.OPENAI,
+      provider: "openai-compatible",
+      model: "gpt-4.1-mini",
+      body: {
+        messages: [{ role: "user", content: "hello" }],
+        stream_options: { include_usage: true },
+      },
+      onComplete(payload) {
+        onCompletePayload = payload;
+      },
+    }
+  );
+
+  assert.doesNotMatch(text, /\[OmniRoute\] Upstream returned an empty response/);
+  assert.match(text, /"choices":\[\]/);
+  assert.match(text, /"usage":\{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10\}/);
+  assert.equal(onCompletePayload.status, 200);
+  assert.equal(onCompletePayload.usage.prompt_tokens, 7);
+  assert.equal(onCompletePayload.usage.completion_tokens, 3);
+  assert.equal(onCompletePayload.responseBody.choices[0].message.content, "Hello");
+  assert.deepEqual(onCompletePayload.responseBody.usage, usage);
 });
 
 test("createSSEStream passthrough logs empty response after tool_calls completion", async () => {
@@ -1684,7 +1745,7 @@ test("createSSEStream passthrough logs empty response after tool_calls completio
                   index: 0,
                   id: "call_tc",
                   type: "function",
-                  function: { name: "task_complete", arguments: '{}' },
+                  function: { name: "task_complete", arguments: "{}" },
                 },
               ],
             },
@@ -1714,7 +1775,10 @@ test("createSSEStream passthrough logs empty response after tool_calls completio
   assert.match(text, /"finish_reason":"tool_calls"/);
   assert.equal(onCompletePayload.status, 200);
   assert.equal(onCompletePayload.responseBody.choices[0].finish_reason, "tool_calls");
-  assert.equal(onCompletePayload.responseBody.choices[0].message.tool_calls[0].function.name, "task_complete");
+  assert.equal(
+    onCompletePayload.responseBody.choices[0].message.tool_calls[0].function.name,
+    "task_complete"
+  );
   // Content should be null (empty) since no text was generated
   assert.equal(onCompletePayload.responseBody.choices[0].message.content, null);
 });

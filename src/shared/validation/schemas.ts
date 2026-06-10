@@ -363,7 +363,10 @@ export const bulkWebSessionImportSchema = z.object({
     .array(
       z.object({
         name: z.string().min(1).max(200),
-        credential: z.string().min(1).max(64 * 1024, "Credential must be under 64 KB"),
+        credential: z
+          .string()
+          .min(1)
+          .max(64 * 1024, "Credential must be under 64 KB"),
       })
     )
     .min(1, "entries must contain at least 1 item")
@@ -751,6 +754,7 @@ export const updateSettingsSchema = z.object({
   pinProviderQuotaToHome: z.boolean().optional(),
   showQuickStartOnHome: z.boolean().optional(),
   showProviderTopologyOnHome: z.boolean().optional(),
+  showTokenSaverOnEndpoint: z.boolean().optional(),
   bruteForceProtection: z.boolean().optional(),
   hiddenSidebarItems: z.array(z.enum(HIDEABLE_SIDEBAR_ITEM_IDS)).optional(),
   comboConfigMode: z.enum(COMBO_CONFIG_MODES).optional(),
