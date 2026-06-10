@@ -89,7 +89,6 @@ function emitFunctionCallPart(
       getSignatureCacheKey(state, toolCall.id),
       state.pendingThoughtSignature
     );
-    state.pendingThoughtSignature = null;
   }
 
   state.toolCalls.set(toolCallIndex, toolCall);

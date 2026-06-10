@@ -41,9 +41,11 @@ RUN --mount=type=cache,target=/root/.npm \
 # Use Turbopack for significant build speedup
 ARG OMNIROUTE_USE_TURBOPACK=0
 ARG OMNIROUTE_BUILD_NODE_OPTIONS="--max-old-space-size=4096"
+ARG NEXT_BUILD_CPUS
 ENV OMNIROUTE_USE_TURBOPACK=${OMNIROUTE_USE_TURBOPACK} \
   NEXT_TELEMETRY_DISABLED=1 \
-  NODE_OPTIONS=${OMNIROUTE_BUILD_NODE_OPTIONS}
+  NODE_OPTIONS=${OMNIROUTE_BUILD_NODE_OPTIONS} \
+  NEXT_BUILD_CPUS=${NEXT_BUILD_CPUS}
 
 COPY . ./
 RUN --mount=type=cache,target=/app/.build/next/cache \

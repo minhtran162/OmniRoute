@@ -101,6 +101,7 @@ const nextConfig = {
   // accept for image-bearing requests; tune via env if a deployment needs
   // more.
   experimental: {
+    cpus: process.env.NEXT_BUILD_CPUS ? parseInt(process.env.NEXT_BUILD_CPUS, 10) : undefined,
     serverActions: {
       bodySizeLimit: process.env.OMNIROUTE_SERVER_ACTIONS_BODY_LIMIT || "50mb",
     },
