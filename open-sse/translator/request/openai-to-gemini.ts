@@ -24,7 +24,13 @@ function generateUUID() {
 
 function isThinkingModel(model: string): boolean {
   const m = model.toLowerCase();
-  return m.includes("think") || m.includes("r1") || m.includes("reason") || m.includes("pro");
+  return (
+    m.includes("think") ||
+    m.includes("r1") ||
+    m.includes("reason") ||
+    m.includes("pro") ||
+    m.includes("flash")
+  );
 }
 
 import {
@@ -799,14 +805,8 @@ register(
   FORMATS.OPENAI,
   FORMATS.GEMINI,
   (model, body, stream = false, credentials = null) => {
-    const modelLower = model.toLowerCase();
-    const isThinkingGemini =
-      modelLower.includes("thinking") ||
-      modelLower.includes("gemini-3") ||
-      modelLower.includes("gemini-2.5") ||
-      modelLower.includes("gemini-pro");
     return openaiToGeminiRequest(model, body, stream, credentials, {
-      signaturelessToolCallMode: isThinkingGemini ? "context" : "native",
+      signaturelessToolCallMode: isThinkingModel(model) ? "context" : "native",
     });
   },
   null
