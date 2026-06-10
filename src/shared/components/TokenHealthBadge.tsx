@@ -87,13 +87,13 @@ export default function TokenHealthBadge() {
             {health.errored > 0 && (
               <div className="flex justify-between">
                 <span className="text-red-400">{t("errored")}</span>
-                <span className="text-text-muted">{health.errored}</span>
+                <span className="text-red-400">{health.errored}</span>
               </div>
             )}
             {health.warning > 0 && (
               <div className="flex justify-between">
                 <span className="text-amber-400">{t("warning")}</span>
-                <span className="text-text-muted">{health.warning}</span>
+                <span className="text-amber-400">{health.warning}</span>
               </div>
             )}
             {health.lastCheckAt && (

@@ -16,11 +16,15 @@ import {
   capThinkingBudget,
   getDefaultThinkingBudget,
 } from "../../../src/lib/modelCapabilities.ts";
-
 import * as crypto from "crypto";
 
 function generateUUID() {
   return crypto.randomUUID();
+}
+
+function isThinkingModel(model: string): boolean {
+  const m = model.toLowerCase();
+  return m.includes("think") || m.includes("r1") || m.includes("reason") || m.includes("pro");
 }
 
 import {
@@ -401,6 +405,7 @@ function openaiToGeminiBase(
             }
           }
 
+          const thinkingModel = isThinkingModel(model);
           let shouldUseEmbeddedSignature = !parts.some((p) => p.thoughtSignature);
           const signaturelessToolCallMode = toolNameOptions.signaturelessToolCallMode;
           const stringifySignaturelessToolCalls = signaturelessToolCallMode === "text";
@@ -430,9 +435,9 @@ function openaiToGeminiBase(
             }
 
             const args = tryParseJSON(fn.arguments || "{}");
-            const embeddedThoughtSignature = shouldUseEmbeddedSignature
-              ? firstPersistedSignature || signatureForToolCall
-              : undefined;
+            const embeddedThoughtSignature = thinkingModel
+              ? signatureForToolCall || firstPersistedSignature || DEFAULT_THINKING_GEMINI_SIGNATURE
+              : (shouldUseEmbeddedSignature ? firstPersistedSignature || signatureForToolCall : undefined);
 
             if (embeddedThoughtSignature) {
               shouldUseEmbeddedSignature = false;
