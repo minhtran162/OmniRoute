@@ -16,7 +16,7 @@ import {
 // (2) COMBO STRATEGIES — extractHandledStrategies + diffComboStrategies
 // ───────────────────────────────────────────────────────────────────────────
 
-test('extractHandledStrategies pulls every `strategy === "..."` literal, deduped', () => {
+test("extractHandledStrategies pulls every `strategy === \"...\"` literal, deduped", () => {
   const src = [
     'if (strategy === "round-robin") {',
     '} else if (strategy === "p2c") {',
@@ -86,7 +86,12 @@ test("extractExecutorAliases parses quoted and bare keys from the executors lite
     "};",
     "export function getExecutor() {}",
   ].join("\n");
-  assert.deepEqual(extractExecutorAliases(src), ["antigravity", "gemini-cli", "agy", "amazon-q"]);
+  assert.deepEqual(extractExecutorAliases(src), [
+    "antigravity",
+    "gemini-cli",
+    "agy",
+    "amazon-q",
+  ]);
 });
 
 test("extractExecutorAliases throws when the executors map cannot be located", () => {

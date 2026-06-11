@@ -23,9 +23,10 @@ test("flags a clientId behind a process.env fallback (env || literal)", () => {
 });
 
 test("flags clientSecret and apiKey literals too", () => {
-  const src = [`clientSecret: "GOCSPX-secret-literal",`, `apiKey: "AIzaSyLeakedFirebaseKey",`].join(
-    "\n"
-  );
+  const src = [
+    `clientSecret: "GOCSPX-secret-literal",`,
+    `apiKey: "AIzaSyLeakedFirebaseKey",`,
+  ].join("\n");
   const v = findLiteralCreds(src, new Set(), "x.ts");
   assert.equal(v.length, 2);
 });
@@ -40,7 +41,7 @@ test("does NOT flag resolvePublicCredMulti() with literal env-name args", () => 
   assert.deepEqual(findLiteralCreds(src, new Set(), "x.ts"), []);
 });
 
-test('does NOT flag empty-string fallback (process.env || "")', () => {
+test("does NOT flag empty-string fallback (process.env || \"\")", () => {
   const src = `clientIdDefault: process.env.GITLAB_OAUTH_CLIENT_ID || "",`;
   assert.deepEqual(findLiteralCreds(src, new Set(), "x.ts"), []);
 });
@@ -74,7 +75,10 @@ test("a NEW literal is still flagged even with the real frozen allowlist", () =>
 });
 
 test("real scanned files produce ZERO violations with the frozen allowlist (gate exits 0)", () => {
-  const scanned = ["open-sse/config/providerRegistry.ts", "src/lib/oauth/constants/oauth.ts"];
+  const scanned = [
+    "open-sse/config/providerRegistry.ts",
+    "src/lib/oauth/constants/oauth.ts",
+  ];
   for (const rel of scanned) {
     const src = fs.readFileSync(path.join(repoRoot, rel), "utf8") as string;
     const v = findLiteralCreds(src, KNOWN_LITERAL_CREDS, rel);
@@ -83,14 +87,18 @@ test("real scanned files produce ZERO violations with the frozen allowlist (gate
 });
 
 test("every frozen literal is actually present in a scanned file (no dead allowlist entries)", () => {
-  const scanned = ["open-sse/config/providerRegistry.ts", "src/lib/oauth/constants/oauth.ts"];
+  const scanned = [
+    "open-sse/config/providerRegistry.ts",
+    "src/lib/oauth/constants/oauth.ts",
+  ];
   const blob = scanned
     .map((rel) => fs.readFileSync(path.join(repoRoot, rel), "utf8") as string)
     .join("\n");
   for (const entry of KNOWN_LITERAL_CREDS) {
     // Plain value entries (no file:line: prefix) must appear verbatim in the source.
-    const value =
-      entry.includes(":") && /:\d+:/.test(entry) ? entry.replace(/^.*?:\d+:/, "") : entry;
+    const value = entry.includes(":") && /:\d+:/.test(entry)
+      ? entry.replace(/^.*?:\d+:/, "")
+      : entry;
     assert.ok(blob.includes(value), `frozen literal not found in any scanned file: ${value}`);
   }
 });

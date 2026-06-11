@@ -5,10 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 // @ts-expect-error — .mjs gate module has no type declarations; runtime shape is known.
-import {
-  findErrorHelperViolations,
-  KNOWN_MISSING_ERROR_HELPER,
-} from "../../scripts/check/check-error-helper.mjs";
+import { findErrorHelperViolations, KNOWN_MISSING_ERROR_HELPER } from "../../scripts/check/check-error-helper.mjs";
 
 type FileEntry = { path: string; source: string };
 type FindFn = (files: FileEntry[], allowlist: Set<string>) => string[];
@@ -175,10 +172,7 @@ test("the shipped allowlist freezes exactly the known current violators", () => 
 test("returns multiple violating paths and preserves input order", () => {
   const files: FileEntry[] = [
     { path: "open-sse/executors/a.ts", source: `return { error: { message: err.message } };` },
-    {
-      path: "open-sse/executors/b.ts",
-      source: `import { x } from "../utils/error.ts"; return { error: err.message };`,
-    },
+    { path: "open-sse/executors/b.ts", source: `import { x } from "../utils/error.ts"; return { error: err.message };` },
     { path: "open-sse/executors/c.ts", source: `return { error: e.stack };` },
   ];
   assert.deepEqual(find(files, EMPTY), ["open-sse/executors/a.ts", "open-sse/executors/c.ts"]);

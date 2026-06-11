@@ -7,11 +7,15 @@ test("no unapproved deps when all are allowlisted", () => {
 });
 
 test("flags a dependency not on the allowlist (potential slopsquat)", () => {
-  assert.deepEqual(findUnapprovedDeps(["react", "reactt-router"], new Set(["react"])), [
-    "reactt-router",
-  ]);
+  assert.deepEqual(
+    findUnapprovedDeps(["react", "reactt-router"], new Set(["react"])),
+    ["reactt-router"]
+  );
 });
 
 test("flags multiple new deps, preserves order, de-dupes", () => {
-  assert.deepEqual(findUnapprovedDeps(["a", "b", "a", "c"], new Set(["a"])), ["b", "c"]);
+  assert.deepEqual(
+    findUnapprovedDeps(["a", "b", "a", "c"], new Set(["a"])),
+    ["b", "c"]
+  );
 });

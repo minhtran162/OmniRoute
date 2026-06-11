@@ -79,10 +79,7 @@ export const COLLECTORS = [
   { glob: "tests/e2e/*.spec.ts", sources: ["package.json"] },
   // Runners custom — test:ecosystem / test:protocols:e2e (spawnam vitest com o arquivo)
   { glob: "tests/e2e/ecosystem.test.ts", sources: ["scripts/dev/run-ecosystem-tests.mjs"] },
-  {
-    glob: "tests/e2e/protocol-clients.test.ts",
-    sources: ["scripts/dev/run-protocol-clients-tests.mjs"],
-  },
+  { glob: "tests/e2e/protocol-clients.test.ts", sources: ["scripts/dev/run-protocol-clients-tests.mjs"] },
 ];
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

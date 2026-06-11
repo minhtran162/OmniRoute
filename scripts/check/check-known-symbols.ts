@@ -168,7 +168,10 @@ export const KNOWN_TRANSLATOR_PAIRS: readonly string[] = [
  * Pares frozen que sumiram do registry vivo (regressão). frozen = snapshot;
  * live = pares observados em runtime. Retorna os que estão no frozen mas não no live.
  */
-export function findMissingTranslatorPairs(frozen: readonly string[], live: Set<string>): string[] {
+export function findMissingTranslatorPairs(
+  frozen: readonly string[],
+  live: Set<string>
+): string[] {
   return frozen.filter((pair) => !live.has(pair));
 }
 
@@ -189,12 +192,13 @@ async function main(): Promise<void> {
   const executorsMod = await import("@omniroute/open-sse/executors/index.ts");
   const getExecutor = executorsMod.getExecutor as (alias: string) => ExecutorLike;
   const BaseExecutor = executorsMod.BaseExecutor as new (...args: never[]) => unknown;
-  const indexSource = readFileSync(resolvePath(REPO_ROOT, "open-sse/executors/index.ts"), "utf8");
+  const indexSource = readFileSync(
+    resolvePath(REPO_ROOT, "open-sse/executors/index.ts"),
+    "utf8"
+  );
   const aliases = extractExecutorAliases(indexSource);
   if (aliases.length === 0) {
-    failures.push(
-      "[executor] parse do mapa `executors` não encontrou nenhum alias (regex quebrada?)"
-    );
+    failures.push("[executor] parse do mapa `executors` não encontrou nenhum alias (regex quebrada?)");
   }
   const isExecutorInstance = (value: unknown) => value instanceof BaseExecutor;
   const badExecutors = findNonConformingExecutors(aliases, getExecutor, isExecutorInstance);
@@ -268,9 +272,7 @@ async function main(): Promise<void> {
 
   // ── Resultado ─────────────────────────────────────────────────────────────
   if (failures.length) {
-    console.error(
-      `[known-symbols] ${failures.length} sub-checagem(ns) falharam:\n\n${failures.join("\n\n")}`
-    );
+    console.error(`[known-symbols] ${failures.length} sub-checagem(ns) falharam:\n\n${failures.join("\n\n")}`);
     process.exit(1);
   }
 
@@ -284,9 +286,7 @@ async function main(): Promise<void> {
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   main().catch((err) => {
-    console.error(
-      `[known-symbols] erro fatal: ${err instanceof Error ? err.message : String(err)}`
-    );
+    console.error(`[known-symbols] erro fatal: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   });
 }

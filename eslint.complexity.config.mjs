@@ -38,7 +38,10 @@ const complexityConfig = [
     // count is exactly "functions over the complexity / length thresholds".
     rules: {
       complexity: ["error", 15],
-      "max-lines-per-function": ["error", { max: 80, skipBlankLines: true, skipComments: true }],
+      "max-lines-per-function": [
+        "error",
+        { max: 80, skipBlankLines: true, skipComments: true },
+      ],
     },
   },
   // Ignore everything that is not first-party src/open-sse production code so the count

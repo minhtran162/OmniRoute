@@ -140,7 +140,7 @@ test("findRawSql: flags a NEW route with raw SQL in a string literal", () => {
   const tmp = path.join(REPO_ROOT, ".tmp-check-db-rules-raw-sql.route.ts");
   fs.writeFileSync(
     tmp,
-    "const rows = db.prepare(`SELECT id FROM users WHERE x = ?`).all();\n",
+    'const rows = db.prepare(`SELECT id FROM users WHERE x = ?`).all();\n',
     "utf8"
   );
   try {
@@ -153,11 +153,7 @@ test("findRawSql: flags a NEW route with raw SQL in a string literal", () => {
 
 test("findRawSql: does NOT flag SQL that only appears in a comment", () => {
   const tmp = path.join(REPO_ROOT, ".tmp-check-db-rules-comment.route.ts");
-  fs.writeFileSync(
-    tmp,
-    "// SELECT id FROM users -- documentation only\nexport const x = 1;\n",
-    "utf8"
-  );
+  fs.writeFileSync(tmp, "// SELECT id FROM users -- documentation only\nexport const x = 1;\n", "utf8");
   try {
     const offenders = findRawSql([tmp], new Set<string>()) as string[];
     assert.deepEqual(offenders, []);

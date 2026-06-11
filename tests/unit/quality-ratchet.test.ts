@@ -14,13 +14,9 @@ function run(baseline: unknown, metrics: unknown, extraArgs: string[] = []) {
   fs.writeFileSync(bPath, JSON.stringify(baseline));
   fs.writeFileSync(mPath, JSON.stringify(metrics));
   try {
-    const out = execFileSync(
-      "node",
-      [SCRIPT, "--baseline", bPath, "--metrics", mPath, ...extraArgs],
-      {
-        encoding: "utf8",
-      }
-    );
+    const out = execFileSync("node", [SCRIPT, "--baseline", bPath, "--metrics", mPath, ...extraArgs], {
+      encoding: "utf8",
+    });
     return { code: 0, out, dir, bPath };
   } catch (e) {
     const err = e as { status?: number; stdout?: string; stderr?: string };

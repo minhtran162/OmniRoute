@@ -4,8 +4,42 @@
 
 ---
 
-<<<<<<< HEAD
-=======
+## [3.8.20] — Unreleased
+
+_Development cycle in progress._
+
+---
+
+## [3.8.19] — Unreleased
+
+_Development cycle in progress._
+
+---
+
+## [3.8.18] — Unreleased
+
+_Development cycle in progress._
+
+---
+
+## [3.8.17] — Unreleased
+
+_Development cycle in progress._
+
+---
+
+## [3.8.16] — Unreleased
+
+_Development cycle in progress._
+
+---
+
+## [3.8.15] — Unreleased
+
+_Development cycle in progress._
+
+---
+
 ## [3.8.14] — Unreleased
 
 _Development cycle in progress._

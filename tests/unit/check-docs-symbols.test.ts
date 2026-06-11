@@ -84,7 +84,10 @@ test("extracts an /api path from inline code and strips trailing prose punctuati
 
 test("keeps balanced [param] / {param} segments intact", () => {
   const md = "DELETE | `/api/shadow/[id]` | and `/api/tools/agent-bridge/agents/{id}/state`";
-  assert.deepEqual(extract(md), ["/api/shadow/[id]", "/api/tools/agent-bridge/agents/{id}/state"]);
+  assert.deepEqual(extract(md), [
+    "/api/shadow/[id]",
+    "/api/tools/agent-bridge/agents/{id}/state",
+  ]);
 });
 
 test("does NOT capture a source-file path tail (src/lib/api/..., @/app/api/...)", () => {

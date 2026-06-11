@@ -29,9 +29,7 @@ export function evaluateMasking(perFile) {
   const flags = [];
   for (const f of perFile) {
     if (f.headAsserts < f.baseAsserts)
-      flags.push(
-        `${f.file}: asserts ${f.baseAsserts} → ${f.headAsserts} (REMOÇÃO de ${f.baseAsserts - f.headAsserts} — enfraquecimento?)`
-      );
+      flags.push(`${f.file}: asserts ${f.baseAsserts} → ${f.headAsserts} (REMOÇÃO de ${f.baseAsserts - f.headAsserts} — enfraquecimento?)`);
     if (f.headTaut > f.baseTaut)
       flags.push(`${f.file}: nova(s) ${f.headTaut - f.baseTaut} tautologia(s) assert.ok(true)`);
   }
@@ -85,9 +83,7 @@ function main() {
     );
     process.exit(1);
   }
-  console.log(
-    `[test-masking] OK — ${changed.length} arquivo(s) de teste modificado(s), sem enfraquecimento`
-  );
+  console.log(`[test-masking] OK — ${changed.length} arquivo(s) de teste modificado(s), sem enfraquecimento`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) main();

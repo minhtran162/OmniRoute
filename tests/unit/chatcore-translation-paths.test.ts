@@ -433,13 +433,14 @@ test("chatCore times out upstream execution before provider response headers", a
       userAgent: "unit-test",
     } as any);
 
-    const pendingDetail = (await waitFor(() =>
-      // details[connectionId] is Record<modelKey, PendingRequestDetail[]> —
-      // the original predicate tested each ARRAY's .providerRequest (always
-      // undefined), so the waitFor could never resolve. Flatten to the details.
-      Object.values(getPendingRequests().details[connectionId] || {})
-        .flat()
-        .find((detail: any) => detail?.providerRequest?.model === "gpt-4o-mini")
+    const pendingDetail = (await waitFor(
+      () =>
+        // details[connectionId] is Record<modelKey, PendingRequestDetail[]> —
+        // the original predicate tested each ARRAY's .providerRequest (always
+        // undefined), so the waitFor could never resolve. Flatten to the details.
+        Object.values(getPendingRequests().details[connectionId] || {})
+          .flat()
+          .find((detail: any) => detail?.providerRequest?.model === "gpt-4o-mini")
     )) as any;
     assert.equal(pendingDetail?.providerRequest?.model, "gpt-4o-mini");
     assert.deepEqual(pendingDetail?.providerRequest?.messages, body.messages);

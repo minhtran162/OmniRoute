@@ -60,7 +60,10 @@ test("evaluateAgainstBaseline: órfão novo é flagado; órfão congelado passa"
 });
 
 test("evaluateAgainstBaseline: entrada congelada que deixou de ser órfã é STALE (remova)", () => {
-  const { newOrphans, stale } = evaluateAgainstBaseline([], ["tests/unit/religado/c.test.ts"]);
+  const { newOrphans, stale } = evaluateAgainstBaseline(
+    [],
+    ["tests/unit/religado/c.test.ts"]
+  );
   assert.deepEqual(newOrphans, []);
   assert.deepEqual(stale, ["tests/unit/religado/c.test.ts"]);
 });

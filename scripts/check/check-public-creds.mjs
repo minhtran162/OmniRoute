@@ -25,7 +25,10 @@ const cwd = process.cwd();
 // Arquivos que carregam configuração de credencial de upstream. O escopo é restrito
 // de propósito: estes são os únicos pontos onde client_id/secret públicos vivem.
 // Adicionar um novo arquivo de config de credencial? Inclua-o aqui.
-const SCANNED_FILES = ["open-sse/config/providerRegistry.ts", "src/lib/oauth/constants/oauth.ts"];
+const SCANNED_FILES = [
+  "open-sse/config/providerRegistry.ts",
+  "src/lib/oauth/constants/oauth.ts",
+];
 
 // Chaves de objeto cujo valor é uma credencial. Atribuir qualquer uma destas a uma
 // string literal não-vazia viola a Hard Rule #11.

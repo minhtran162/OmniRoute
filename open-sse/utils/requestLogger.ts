@@ -240,20 +240,20 @@ function makeStreamChunkMethods(options: RequestLoggerOptions, captureChunks: bo
     if (pendingPushed) return;
     if (!options.connectionId || !options.model) return;
     pendingPushed = true;
-    try {
-      const pending = getPendingById();
-      for (const entry of pending.values()) {
-        if (entry?.model === options.model && entry.provider === (options.provider || "")) {
-          entry.streamChunks = { ...streamChunks };
-          return;
-        }
-      }
-    } catch (e) {
-      // Do not allow logging failures to disrupt request handling
       try {
-        console.warn("[requestLogger] updatePendingRequestStreamChunks failed:", e);
-      } catch {}
-    }
+        const pending = getPendingById();
+        for (const entry of pending.values()) {
+          if (entry?.model === options.model && entry.provider === (options.provider || "")) {
+            entry.streamChunks = { ...streamChunks };
+            return;
+          }
+        }
+      } catch (e) {
+        // Do not allow logging failures to disrupt request handling
+        try {
+          console.warn("[requestLogger] updatePendingRequestStreamChunks failed:", e);
+        } catch {}
+      }
   };
 
   const append = (arr: string[], bytes: { value: number; truncated: boolean }, chunk: string) => {

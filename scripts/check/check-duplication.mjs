@@ -19,18 +19,7 @@ const BASELINE_PATH = path.resolve(
 );
 const UPDATE = process.argv.includes("--update");
 const EPS = 0.05; // tolerância de ruído de float (jscpd é determinístico; isto é margem)
-const JSCPD_ARGS = [
-  "jscpd@4",
-  "src",
-  "open-sse",
-  "--reporters",
-  "json",
-  "--silent",
-  "--min-tokens",
-  "50",
-  "--ignore",
-  "**/*.test.ts,**/*.test.tsx,**/__tests__/**",
-];
+const JSCPD_ARGS = ["jscpd@4", "src", "open-sse", "--reporters", "json", "--silent", "--min-tokens", "50", "--ignore", "**/*.test.ts,**/*.test.tsx,**/__tests__/**"];
 
 /** Avalia a % atual contra o baseline. */
 export function evaluateDuplication(current, baseline, eps = EPS) {

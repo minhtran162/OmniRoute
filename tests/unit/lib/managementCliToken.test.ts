@@ -20,8 +20,9 @@ await settingsDb.updateSettings({
   password: "test-password-hash",
 });
 
-const { getLegacyCliTokenSync, getMachineTokenSync } =
-  await import("../../../src/lib/machineToken.ts");
+const { getLegacyCliTokenSync, getMachineTokenSync } = await import(
+  "../../../src/lib/machineToken.ts"
+);
 const { managementPolicy } = await import("../../../src/server/authz/policies/management.ts");
 const { CLI_TOKEN_HEADER } = await import("../../../src/server/authz/headers.ts");
 

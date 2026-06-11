@@ -10,9 +10,7 @@ test("no orphans when every registry id is a known provider", () => {
 });
 
 test("flags a registry id that is not a canonical provider (hallucinated/half-registered)", () => {
-  assert.deepEqual(findOrphanRegistryIds(["openai", "ghostprovider"], isKnown, {}), [
-    "ghostprovider",
-  ]);
+  assert.deepEqual(findOrphanRegistryIds(["openai", "ghostprovider"], isKnown, {}), ["ghostprovider"]);
 });
 
 test("allowlisted ids are not flagged", () => {

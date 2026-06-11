@@ -14,21 +14,21 @@
 
 ## Mapa de arquivos (o que será criado/modificado)
 
-| Arquivo                                               | Responsabilidade                                                                                  |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `quality-baseline.json` (criar, **commitar**)         | Baseline congelado: por métrica `{value, direction}` (`down`=menor-é-melhor, `up`=maior-é-melhor) |
-| `scripts/quality/collect-metrics.mjs` (criar)         | Roda os coletores → emite `quality-metrics.json`                                                  |
-| `scripts/quality/check-quality-ratchet.mjs` (criar)   | Comparador genérico: falha em qualquer regressão; com `--update` ratcheta o baseline              |
-| `scripts/check/check-fetch-targets.mjs` (criar)       | Todo `fetch("/api/...")` do dashboard resolve para um `route.ts` real                             |
-| `scripts/check/check-provider-consistency.ts` (criar) | ids de provider batem entre `providers.ts` ↔ `providerRegistry.ts` ↔ `validation.ts`              |
-| `scripts/check/check-openapi-routes.mjs` (criar)      | Toda `path` do `openapi.yaml` ↔ `route.ts` real (bidirecional)                                    |
-| `scripts/check/check-deps.mjs` (criar)                | Anti-slopsquatting: allowlist + existência no registry + age-cooldown                             |
-| `.github/workflows/ci.yml` (modificar)                | Novo job `quality-gate`; reconciliar gate de cobertura; escalonar audit; plugar scripts órfãos    |
-| `.husky/pre-commit` (modificar)                       | Reativar a parte barata                                                                           |
-| `package.json` (modificar)                            | Novos scripts `check:*` / `quality:*`                                                             |
-| `eslint.config.mjs` (modificar, Fase 3)               | `max-lines`, `max-lines-per-function`, `complexity`, `sonarjs/cognitive-complexity` (warn)        |
-| `.claude/skills/babysit/SKILL.md` (criar, Fase 5)     | Skill `/babysit`                                                                                  |
-| `tests/unit/quality-ratchet.test.ts` etc. (criar)     | Testes TDD de cada gate                                                                           |
+| Arquivo | Responsabilidade |
+|---------|------------------|
+| `quality-baseline.json` (criar, **commitar**) | Baseline congelado: por métrica `{value, direction}` (`down`=menor-é-melhor, `up`=maior-é-melhor) |
+| `scripts/quality/collect-metrics.mjs` (criar) | Roda os coletores → emite `quality-metrics.json` |
+| `scripts/quality/check-quality-ratchet.mjs` (criar) | Comparador genérico: falha em qualquer regressão; com `--update` ratcheta o baseline |
+| `scripts/check/check-fetch-targets.mjs` (criar) | Todo `fetch("/api/...")` do dashboard resolve para um `route.ts` real |
+| `scripts/check/check-provider-consistency.ts` (criar) | ids de provider batem entre `providers.ts` ↔ `providerRegistry.ts` ↔ `validation.ts` |
+| `scripts/check/check-openapi-routes.mjs` (criar) | Toda `path` do `openapi.yaml` ↔ `route.ts` real (bidirecional) |
+| `scripts/check/check-deps.mjs` (criar) | Anti-slopsquatting: allowlist + existência no registry + age-cooldown |
+| `.github/workflows/ci.yml` (modificar) | Novo job `quality-gate`; reconciliar gate de cobertura; escalonar audit; plugar scripts órfãos |
+| `.husky/pre-commit` (modificar) | Reativar a parte barata |
+| `package.json` (modificar) | Novos scripts `check:*` / `quality:*` |
+| `eslint.config.mjs` (modificar, Fase 3) | `max-lines`, `max-lines-per-function`, `complexity`, `sonarjs/cognitive-complexity` (warn) |
+| `.claude/skills/babysit/SKILL.md` (criar, Fase 5) | Skill `/babysit` |
+| `tests/unit/quality-ratchet.test.ts` etc. (criar) | Testes TDD de cada gate |
 
 ---
 
@@ -39,18 +39,15 @@
 **Contexto:** `ci.yml:377` gata em `40/40/40/40`; local gata `60`; comentário renderiza `60`; baseline real ≈ 79–82%. O 40 torna o gate quase banguela.
 
 **Files:**
-
 - Modify: `.github/workflows/ci.yml:376-377`
 
 - [ ] **Step 1: Confirmar o baseline real de cobertura**
 
 Run:
-
 ```bash
 npm run test:coverage 2>&1 | tail -20
 node -e "const c=require('./coverage/coverage-summary.json').total; console.log(c.statements.pct,c.lines.pct,c.functions.pct,c.branches.pct)"
 ```
-
 Expected: 4 números (ex.: `79.8 79.8 82.2 75.2`). Anote-os.
 
 - [ ] **Step 2: Subir o gate do CI para `baseline_real - 2` (headroom anti-flake)**
@@ -62,7 +59,6 @@ Em `.github/workflows/ci.yml`, troque a linha `--statements 40 --lines 40 --func
 - [ ] **Step 4: Verificar que o CI não quebra** — abrir um PR de teste (ou rodar `act`/push numa branch) e confirmar que o job `test-coverage` fica verde com o novo piso.
 
 - [ ] **Step 5: Commit**
-
 ```bash
 git add .github/workflows/ci.yml package.json scripts/check/test-report-summary.mjs
 git commit -m "fix(ci): reconcile coverage gate to real baseline (40->~78) across CI/local/report"
@@ -73,21 +69,17 @@ git commit -m "fix(ci): reconcile coverage gate to real baseline (40->~78) acros
 **Files:** Modify: `package.json:112`
 
 - [ ] **Step 1: Trocar o script `audit:deps`** de `npm audit --audit-level=moderate && npm run audit:electron` para:
-
 ```json
 "audit:deps": "npm audit --audit-level=critical && (npm audit --audit-level=high || echo '::warning::high-severity advisories present (non-blocking)') && npm run audit:electron",
 ```
 
 - [ ] **Step 2: Rodar e observar o comportamento**
-
 ```bash
 npm run audit:deps; echo "exit=$?"
 ```
-
 Expected: `exit=0` se não houver critical; mensagem de warning se houver high.
 
 - [ ] **Step 3: Commit**
-
 ```bash
 git add package.json && git commit -m "chore(ci): tier npm audit (critical blocks, high warns)"
 ```
@@ -99,17 +91,14 @@ git add package.json && git commit -m "chore(ci): tier npm audit (critical block
 **Files:** Modify: `.github/workflows/ci.yml` (job `docs-sync-strict` ou `lint`)
 
 - [ ] **Step 1: Rodar os 3 localmente para confirmar verde no estado atual**
-
 ```bash
 npm run check:cli-i18n && npm run check:openapi-coverage && npm run check:openapi-security-tiers; echo "exit=$?"
 ```
-
 Expected: `exit=0` (se algum falhar, corrija a deriva antes de plugar).
 
 - [ ] **Step 2: Adicionar os 3 como steps** no job `docs-sync-strict` do `ci.yml`, após `check:docs-all`.
 
 - [ ] **Step 3: Commit**
-
 ```bash
 git add .github/workflows/ci.yml && git commit -m "ci: wire orphaned gates (cli-i18n, openapi-coverage, openapi-security-tiers)"
 ```
@@ -119,26 +108,21 @@ git add .github/workflows/ci.yml && git commit -m "ci: wire orphaned gates (cli-
 **Files:** Modify: `.husky/pre-commit`
 
 - [ ] **Step 1: Descomentar SÓ as 3 linhas baratas e determinísticas:**
-
 ```sh
 npx lint-staged
 node scripts/check/check-docs-sync.mjs
 npm run check:any-budget:t11
 ```
-
 (Deixe i18n/openapi comentados por enquanto — eles são mais lentos; rodam no CI.)
 
 - [ ] **Step 2: Testar o hook** com um commit trivial e medir o tempo:
-
 ```bash
 time git commit --allow-empty -m "chore: test pre-commit hook"
 git reset --soft HEAD~1
 ```
-
 Expected: hook roda lint-staged + 2 checks em poucos segundos.
 
 - [ ] **Step 3: Commit**
-
 ```bash
 git add .husky/pre-commit && git commit -m "chore(husky): re-enable cheap pre-commit gates (lint-staged, docs-sync, any-budget)"
 ```
@@ -152,12 +136,10 @@ git add .husky/pre-commit && git commit -m "chore(husky): re-enable cheap pre-co
 ### Task 1.1: Comparador genérico de catraca (TDD)
 
 **Files:**
-
 - Create: `scripts/quality/check-quality-ratchet.mjs`
 - Test: `tests/unit/quality-ratchet.test.ts`
 
 - [ ] **Step 1: Escrever o teste que falha**
-
 ```ts
 // tests/unit/quality-ratchet.test.ts
 import { test } from "node:test";
@@ -176,11 +158,7 @@ function run(baseline, metrics, extraArgs = []) {
   fs.writeFileSync(bPath, JSON.stringify(baseline));
   fs.writeFileSync(mPath, JSON.stringify(metrics));
   try {
-    const out = execFileSync(
-      "node",
-      [SCRIPT, "--baseline", bPath, "--metrics", mPath, ...extraArgs],
-      { encoding: "utf8" }
-    );
+    const out = execFileSync("node", [SCRIPT, "--baseline", bPath, "--metrics", mPath, ...extraArgs], { encoding: "utf8" });
     return { code: 0, out, dir, bPath };
   } catch (e) {
     return { code: e.status, out: (e.stdout || "") + (e.stderr || ""), dir, bPath };
@@ -188,12 +166,7 @@ function run(baseline, metrics, extraArgs = []) {
 }
 
 test("passes when metrics equal baseline", () => {
-  const b = {
-    metrics: {
-      eslintWarnings: { value: 100, direction: "down" },
-      "coverage.lines": { value: 80, direction: "up" },
-    },
-  };
+  const b = { metrics: { eslintWarnings: { value: 100, direction: "down" }, "coverage.lines": { value: 80, direction: "up" } } };
   assert.equal(run(b, { eslintWarnings: 100, "coverage.lines": 80 }).code, 0);
 });
 
@@ -224,15 +197,12 @@ test("fails (code 2) when a baseline metric is missing from collected metrics", 
 ```
 
 - [ ] **Step 2: Rodar o teste e ver falhar**
-
 ```bash
 node --import tsx --test tests/unit/quality-ratchet.test.ts
 ```
-
 Expected: FAIL (script não existe ainda).
 
 - [ ] **Step 3: Implementar o comparador**
-
 ```js
 #!/usr/bin/env node
 // scripts/quality/check-quality-ratchet.mjs
@@ -253,10 +223,7 @@ const UPDATE = process.argv.includes("--update");
 const EPS = 0.01;
 
 function load(p) {
-  if (!fs.existsSync(p)) {
-    console.error(`[quality-ratchet] arquivo ausente: ${p}`);
-    process.exit(2);
-  }
+  if (!fs.existsSync(p)) { console.error(`[quality-ratchet] arquivo ausente: ${p}`); process.exit(2); }
   return JSON.parse(fs.readFileSync(p, "utf8"));
 }
 
@@ -270,44 +237,22 @@ for (const [key, spec] of Object.entries(baseline.metrics)) {
   const current = metrics[key];
   const base = spec.value;
   const dir = spec.direction; // "down" = menor-é-melhor | "up" = maior-é-melhor
-  if (current === undefined) {
-    failures.push(`métrica "${key}" ausente em ${path.basename(METRICS)}`);
-    rows.push([key, base, "—", "MISSING"]);
-    continue;
-  }
+  if (current === undefined) { failures.push(`métrica "${key}" ausente em ${path.basename(METRICS)}`); rows.push([key, base, "—", "MISSING"]); continue; }
   let status = "ok";
   if (dir === "down") {
-    if (current > base + EPS) {
-      failures.push(`${key}: ${current} > baseline ${base} (não pode aumentar)`);
-      status = "REGRESSÃO";
-    } else if (current < base - EPS) {
-      improvements.push([key, current]);
-      status = "↑ melhorou";
-    }
+    if (current > base + EPS) { failures.push(`${key}: ${current} > baseline ${base} (não pode aumentar)`); status = "REGRESSÃO"; }
+    else if (current < base - EPS) { improvements.push([key, current]); status = "↑ melhorou"; }
   } else {
-    if (current < base - EPS) {
-      failures.push(`${key}: ${current} < baseline ${base} (não pode cair)`);
-      status = "REGRESSÃO";
-    } else if (current > base + EPS) {
-      improvements.push([key, current]);
-      status = "↑ melhorou";
-    }
+    if (current < base - EPS) { failures.push(`${key}: ${current} < baseline ${base} (não pode cair)`); status = "REGRESSÃO"; }
+    else if (current > base + EPS) { improvements.push([key, current]); status = "↑ melhorou"; }
   }
   rows.push([key, base, current, status]);
 }
 
 if (SUMMARY) {
-  const md = [
-    "# Quality Ratchet",
-    "",
-    "| Métrica | Baseline | Atual | Status |",
-    "|---|---|---|---|",
-    ...rows.map(([k, b, c, s]) => `| ${k} | ${b} | ${c} | ${s} |`),
-    "",
-    failures.length
-      ? `**${failures.length} regressão(ões) — gate BLOQUEADO.**`
-      : "**Sem regressões — gate OK.**",
-  ].join("\n");
+  const md = ["# Quality Ratchet", "", "| Métrica | Baseline | Atual | Status |", "|---|---|---|---|",
+    ...rows.map(([k, b, c, s]) => `| ${k} | ${b} | ${c} | ${s} |`), "",
+    failures.length ? `**${failures.length} regressão(ões) — gate BLOQUEADO.**` : "**Sem regressões — gate OK.**"].join("\n");
   fs.mkdirSync(path.dirname(SUMMARY), { recursive: true });
   fs.writeFileSync(SUMMARY, md + "\n");
 }
@@ -318,23 +263,17 @@ if (UPDATE && failures.length === 0 && improvements.length) {
   console.log(`[quality-ratchet] baseline ratcheado: ${improvements.length} métrica(s) melhoraram`);
 }
 
-if (failures.length) {
-  console.error("[quality-ratchet] FALHOU:\n" + failures.map((f) => "  ✗ " + f).join("\n"));
-  process.exit(1);
-}
+if (failures.length) { console.error("[quality-ratchet] FALHOU:\n" + failures.map((f) => "  ✗ " + f).join("\n")); process.exit(1); }
 console.log(`[quality-ratchet] OK (${rows.length} métricas, ${improvements.length} melhoraram)`);
 ```
 
 - [ ] **Step 4: Rodar o teste e ver passar**
-
 ```bash
 node --import tsx --test tests/unit/quality-ratchet.test.ts
 ```
-
 Expected: PASS (5/5).
 
 - [ ] **Step 5: Commit**
-
 ```bash
 git add scripts/quality/check-quality-ratchet.mjs tests/unit/quality-ratchet.test.ts
 git commit -m "feat(quality): generic ratchet comparator (multi-metric, regression-only)"
@@ -345,7 +284,6 @@ git commit -m "feat(quality): generic ratchet comparator (multi-metric, regressi
 **Files:** Create: `scripts/quality/collect-metrics.mjs`
 
 - [ ] **Step 1: Implementar o coletor**
-
 ```js
 #!/usr/bin/env node
 // scripts/quality/collect-metrics.mjs — emite quality-metrics.json
@@ -360,13 +298,8 @@ const out = {};
 function eslintCounts() {
   let stdout;
   try {
-    stdout = execFileSync("npx", ["eslint", ".", "--format", "json"], {
-      encoding: "utf8",
-      maxBuffer: 256 * 1024 * 1024,
-    });
-  } catch (e) {
-    stdout = e.stdout?.toString() || "[]";
-  } // eslint sai !=0 quando há errors
+    stdout = execFileSync("npx", ["eslint", ".", "--format", "json"], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  } catch (e) { stdout = e.stdout?.toString() || "[]"; } // eslint sai !=0 quando há errors
   const results = JSON.parse(stdout);
   out.eslintWarnings = results.reduce((n, r) => n + (r.warningCount || 0), 0);
   out.eslintErrors = results.reduce((n, r) => n + (r.errorCount || 0), 0);
@@ -390,15 +323,12 @@ console.log("[collect-metrics]", JSON.stringify(out));
 ```
 
 - [ ] **Step 2: Rodar e inspecionar a saída**
-
 ```bash
 node scripts/quality/collect-metrics.mjs && cat quality-metrics.json
 ```
-
 Expected: JSON com `eslintWarnings`, `eslintErrors` e (se houver coverage) os 4 `coverage.*`. **Anote `eslintWarnings`.**
 
 - [ ] **Step 3: Commit**
-
 ```bash
 git add scripts/quality/collect-metrics.mjs && echo "quality-metrics.json" >> .gitignore
 git add .gitignore && git commit -m "feat(quality): metrics collector (eslint warnings + coverage)"
@@ -409,7 +339,6 @@ git add .gitignore && git commit -m "feat(quality): metrics collector (eslint wa
 **Files:** Create: `quality-baseline.json` (**commitado**)
 
 - [ ] **Step 1: Gerar o baseline a partir das métricas reais** (use os números anotados):
-
 ```json
 {
   "_comment": "Catraca: 'down' nao pode aumentar, 'up' nao pode cair. Atualize via 'npm run quality:ratchet -- --update' (so em melhora).",
@@ -424,18 +353,15 @@ git add .gitignore && git commit -m "feat(quality): metrics collector (eslint wa
 ```
 
 - [ ] **Step 2: Validar a catraca contra si mesma**
-
 ```bash
 node scripts/quality/collect-metrics.mjs
 node scripts/quality/check-quality-ratchet.mjs; echo "exit=$?"
 ```
-
 Expected: `[quality-ratchet] OK` e `exit=0`.
 
 - [ ] **Step 3: Provar que pega regressão** (teste manual): edite `quality-metrics.json` somando 1 a `eslintWarnings`, rode o comparador, confirme `exit=1`, depois descarte a edição.
 
 - [ ] **Step 4: Adicionar scripts npm**
-
 ```json
 "quality:collect": "node scripts/quality/collect-metrics.mjs",
 "quality:ratchet": "node scripts/quality/check-quality-ratchet.mjs",
@@ -443,7 +369,6 @@ Expected: `[quality-ratchet] OK` e `exit=0`.
 ```
 
 - [ ] **Step 5: Commit**
-
 ```bash
 git add quality-baseline.json package.json
 git commit -m "feat(quality): freeze initial quality baseline (eslint warnings + coverage)"
@@ -454,27 +379,26 @@ git commit -m "feat(quality): freeze initial quality baseline (eslint warnings +
 **Files:** Modify: `.github/workflows/ci.yml`
 
 - [ ] **Step 1: Adicionar job `quality-gate`** (depois de `test-coverage`, para reusar `coverage/coverage-summary.json`):
-
 ```yaml
-quality-gate:
-  name: Quality Ratchet
-  runs-on: ubuntu-latest
-  needs: test-coverage
-  if: ${{ always() && needs.test-coverage.result == 'success' }}
-  steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
-      with: { node-version: "24", cache: "npm" }
-    - run: npm ci
-    - uses: actions/download-artifact@v4
-      with: { name: coverage-report, path: coverage/ }
-    - run: npm run quality:collect
-    - run: node scripts/quality/check-quality-ratchet.mjs --summary .artifacts/quality-ratchet.md
-    - if: always()
-      run: cat .artifacts/quality-ratchet.md >> "$GITHUB_STEP_SUMMARY"
-    - if: always()
-      uses: actions/upload-artifact@v4
-      with: { name: quality-ratchet, path: .artifacts/quality-ratchet.md }
+  quality-gate:
+    name: Quality Ratchet
+    runs-on: ubuntu-latest
+    needs: test-coverage
+    if: ${{ always() && needs.test-coverage.result == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: 'npm' }
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with: { name: coverage-report, path: coverage/ }
+      - run: npm run quality:collect
+      - run: node scripts/quality/check-quality-ratchet.mjs --summary .artifacts/quality-ratchet.md
+      - if: always()
+        run: cat .artifacts/quality-ratchet.md >> "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: quality-ratchet, path: .artifacts/quality-ratchet.md }
 ```
 
 - [ ] **Step 2: Adicionar comentário no PR** clonando o job `coverage-pr-comment` (marcador `<!-- omniroute-quality-ratchet -->`, lê `.artifacts/quality-ratchet.md`). Reuse o mesmo `github-script` de upsert de comentário.
@@ -482,7 +406,6 @@ quality-gate:
 - [ ] **Step 3: Validar num PR de teste** — confirmar que o job aparece, o step summary mostra a tabela, e o comentário é postado.
 
 - [ ] **Step 4: Commit**
-
 ```bash
 git add .github/workflows/ci.yml
 git commit -m "ci(quality): add quality-ratchet job with PR comment + artifact"
@@ -499,12 +422,10 @@ git commit -m "ci(quality): add quality-ratchet job with PR comment + artifact"
 **Ataca:** ímã nº2 (300 paths `fetch("/api/...")` sem ligação com as rotas).
 
 **Files:**
-
 - Create: `scripts/check/check-fetch-targets.mjs`
 - Test: `tests/unit/check-fetch-targets.test.ts`
 
 - [ ] **Step 1: Escrever o teste que falha**
-
 ```ts
 // tests/unit/check-fetch-targets.test.ts
 import { test } from "node:test";
@@ -528,15 +449,12 @@ test("rejects a hallucinated route", () => {
 ```
 
 - [ ] **Step 2: Rodar e ver falhar**
-
 ```bash
 node --import tsx --test tests/unit/check-fetch-targets.test.ts
 ```
-
 Expected: FAIL (módulo não existe).
 
 - [ ] **Step 3: Implementar o gate**
-
 ```js
 #!/usr/bin/env node
 // scripts/check/check-fetch-targets.mjs
@@ -562,24 +480,14 @@ function walk(dir, acc = []) {
 }
 
 function collectRouteFiles() {
-  return new Set(
-    walk(API)
-      .filter((p) => /route\.tsx?$/.test(p))
-      .map((p) => path.relative(cwd, p).replace(/\\/g, "/"))
-  );
+  return new Set(walk(API).filter((p) => /route\.tsx?$/.test(p)).map((p) => path.relative(cwd, p).replace(/\\/g, "/")));
 }
 
 export function resolveApiPathToRoute(apiPath, routeFiles) {
   // apiPath ex.: /api/providers/abc/models  →  src/app/api/providers/[id]/models/route.ts
-  const segs = apiPath
-    .replace(/^\//, "")
-    .replace(/[?#].*$/, "")
-    .split("/"); // ["api","providers","abc","models"]
+  const segs = apiPath.replace(/^\//, "").replace(/[?#].*$/, "").split("/"); // ["api","providers","abc","models"]
   for (const rf of routeFiles) {
-    const rsegs = rf
-      .replace(/^src\/app\//, "")
-      .replace(/\/route\.tsx?$/, "")
-      .split("/"); // ["api","providers","[id]","models"]
+    const rsegs = rf.replace(/^src\/app\//, "").replace(/\/route\.tsx?$/, "").split("/"); // ["api","providers","[id]","models"]
     if (rsegs.length !== segs.length) continue;
     const ok = rsegs.every((rs, i) => rs === segs[i] || /^\[.*\]$/.test(rs));
     if (ok) return true;
@@ -602,15 +510,11 @@ function main() {
   for (const f of walk(DASH)) {
     for (const apiPath of extractFetchPaths(f)) {
       if (IGNORE.some((rx) => rx.test(apiPath))) continue;
-      if (!resolveApiPathToRoute(apiPath, routeFiles))
-        misses.push(`${path.relative(cwd, f)} → ${apiPath}`);
+      if (!resolveApiPathToRoute(apiPath, routeFiles)) misses.push(`${path.relative(cwd, f)} → ${apiPath}`);
     }
   }
   if (misses.length) {
-    console.error(
-      `[check-fetch-targets] ${misses.length} fetch(es) para rota inexistente:\n` +
-        misses.map((m) => "  ✗ " + m).join("\n")
-    );
+    console.error(`[check-fetch-targets] ${misses.length} fetch(es) para rota inexistente:\n` + misses.map((m) => "  ✗ " + m).join("\n"));
     process.exit(1);
   }
   console.log(`[check-fetch-targets] OK (${routeFiles.size} rotas conhecidas)`);
@@ -620,27 +524,21 @@ if (import.meta.url === `file://${process.argv[1]}`) main();
 ```
 
 - [ ] **Step 4: Rodar o teste unitário e ver passar**
-
 ```bash
 node --import tsx --test tests/unit/check-fetch-targets.test.ts
 ```
-
 Expected: PASS (3/3).
 
 - [ ] **Step 5: Rodar o gate no repo real** (modo descoberta — pode encontrar misses legítimos)
-
 ```bash
 node scripts/check/check-fetch-targets.mjs; echo "exit=$?"
 ```
-
 Se encontrar misses reais: triagem — ou são rotas faltantes (bug), ou paths dinâmicos a adicionar ao `IGNORE`. **Não** mascare; documente cada exceção no `IGNORE` com comentário.
 
 - [ ] **Step 6: Adicionar script + commit**
-
 ```json
 "check:fetch-targets": "node scripts/check/check-fetch-targets.mjs"
 ```
-
 ```bash
 git add scripts/check/check-fetch-targets.mjs tests/unit/check-fetch-targets.test.ts package.json
 git commit -m "feat(check): gate that every dashboard fetch() targets a real API route"
@@ -653,14 +551,12 @@ git commit -m "feat(check): gate that every dashboard fetch() targets a real API
 **Files:** Create: `scripts/check/check-provider-consistency.ts` (rodado via `tsx`); Test: `tests/unit/check-provider-consistency.test.ts`
 
 - [ ] **Step 0 (VERIFICAÇÃO — obrigatório antes de codar):** descobrir os nomes reais de export, para **não inventar**:
-
 ```bash
 grep -nE "export (const|function) " src/shared/constants/providers.ts | grep -iE "provider|section" | head
 grep -nE "getOrCreateAiProviders|_PROVIDER_SECTIONS|AI_PROVIDERS" src/shared/constants/providers.ts | head
 grep -nE "baseUrl|^\s*['\"][a-z0-9-]+['\"]\s*:" open-sse/config/providerRegistry.ts | head
 grep -nE "case ['\"]|=== ['\"]|SPECIALTY_VALIDATORS" src/lib/providers/validation.ts | head
 ```
-
 Anote: como enumerar os ids canônicos em runtime, a forma das chaves do `providerRegistry.ts`, e onde `validation.ts` lista os providers cobertos.
 
 - [ ] **Step 1: Escrever o teste** com fixtures sintéticas (3 conjuntos de ids), afirmando que o diff detecta um id presente em um e ausente em outro. (Implemente a lógica como função pura `diffProviderSets(canonical, registry, validators)` que retorna `{missingInRegistry, missingInValidators, orphanInRegistry}`.)
@@ -682,11 +578,9 @@ Anote: como enumerar os ids canônicos em runtime, a forma das chaves do `provid
 **Files:** Create: `scripts/check/check-openapi-routes.mjs`; Test correspondente.
 
 - [ ] **Step 0 (VERIFICAÇÃO):** confirmar o caminho e a forma do spec:
-
 ```bash
 ls docs/reference/openapi.yaml && grep -nE "^\s{2,4}/[a-z]" docs/reference/openapi.yaml | head
 ```
-
 Confirmar como `check-openapi-coverage.mjs` já parseia o YAML (reusar o parser dele).
 
 - [ ] **Step 1–5 (TDD):** teste com spec sintética → implementar: toda `path` do spec resolve para um `route.ts` (reusando `resolveApiPathToRoute` da Task 2.1) e toda rota não-interna aparece no spec (com allowlist para rotas LOCAL_ONLY/internas). Commit.
@@ -708,7 +602,7 @@ Confirmar como `check-openapi-coverage.mjs` já parseia o YAML (reusar o parser 
 
 ---
 
-# FASE 3 — Catraca de Duplicação + Tamanho (mata-slop) — _expandir em sub-plano_
+# FASE 3 — Catraca de Duplicação + Tamanho (mata-slop) — *expandir em sub-plano*
 
 **Justificativa:** GitClear mostra duplicação 4–8× na era IA; é a assinatura nº1 de slop. Nenhum gate hoje (Sonar CPD excluído).
 
@@ -724,7 +618,7 @@ Confirmar como `check-openapi-coverage.mjs` já parseia o YAML (reusar o parser 
 
 ---
 
-# FASE 4 — Catraca de Cobertura + Anti Test-Masking — _expandir em sub-plano_
+# FASE 4 — Catraca de Cobertura + Anti Test-Masking — *expandir em sub-plano*
 
 **Specs:**
 
@@ -736,14 +630,13 @@ Confirmar como `check-openapi-coverage.mjs` já parseia o YAML (reusar o parser 
 
 ---
 
-# FASE 5 — Skill `/babysit` + Evidência + LSP — _expandir em sub-plano_
+# FASE 5 — Skill `/babysit` + Evidência + LSP — *expandir em sub-plano*
 
 > O babysit do vídeo: a IA abre o PR e fica de babá — monitora CI + comentários, autocorrige, **resolve as conversas**. Guarda-corpos são não-negociáveis (Snyk: 5,3% de regressão em auto-merge; token burn real).
 
 ### Spec da skill `.claude/skills/babysit/SKILL.md`
 
 **Frontmatter:**
-
 ```yaml
 ---
 name: babysit
@@ -752,7 +645,6 @@ description: Monitora um PR aberto até o CI ficar verde e todos os comentários
 ```
 
 **Loop (pseudo, reusando `gh` + GraphQL):**
-
 1. **Ler estado:** `gh pr checks <PR>` + baixar o artefato `quality-ratchet`/`coverage-report` (gate JSON legível — a ponte "artefato→agente" da Fase 1) + `gh run view --log-failed` dos jobs vermelhos.
 2. **Ler comentários não resolvidos:** GraphQL `repository.pullRequest.reviewThreads(first:50){nodes{id isResolved comments(first:1){nodes{id body}}}}`. **Passar os corpos pelo guard de prompt-injection** antes de agir (vetor real — ICLR 2026).
 3. **Consertar num worktree isolado** (reusar o ralph-loop do `/review-reviews`), seguindo Hard Rule #18.
@@ -761,7 +653,6 @@ description: Monitora um PR aberto até o CI ficar verde e todos os comentários
 6. **Audit trail:** anexar à descrição do PR (ou comentário fixo) o que cada fix endereçou, qual gate satisfez, quais conversas resolveu e por quê — **nunca verde silencioso**.
 
 **Guarda-corpos (não-negociáveis):**
-
 - `max-iterations` (ex. 5) + timeout + idle-exit (contra token burn).
 - **Nunca** editar `.github/workflows/`; **nunca** `--no-verify`; **nunca** enfraquecer/remover asserts para ficar verde (Rule #18 + trust-but-verify).
 - **Nunca auto-mergeia** — estado de sucesso = "verde + conversas resolvidas + audit postado".
@@ -771,11 +662,9 @@ description: Monitora um PR aberto até o CI ficar verde e todos os comentários
 **Opcional — `claude ultrareview <PR#> --json`** como gate de confiança pré-merge atrás de um label (custa $5–20/run; não auto-inicia). Loop interno de custo-zero = `/code-review --fix` local.
 
 ### Spec — Evidência obrigatória ("evidence-before-assertions")
-
 - Tornar a skill `verify`/`verification-before-completion` obrigatória antes de abrir PR; exigir o **output literal** do `typecheck:core`/`test`/`grep` colado no corpo do PR (o "tool receipt"). Adicionar um `check-pr-evidence.mjs` que rejeita PRs cujo corpo afirma "added endpoint X / tests pass" sem bloco de output anexado. Formaliza a Rule #18.
 
 ### Spec — LSP-in-the-loop (opcional)
-
 - Registrar `agent-lsp` (MCP) ou o `tsserver` para os agentes terem `blast_radius`/diagnostics e `preview_edit` antes de escrever — vira "símbolo inventado" de catch-de-review para impossibilidade-no-edit. Pareia com `typecheck:core` como gate pré-PR (compile-before-claim).
 
 **Critérios de aceitação:** a skill `/babysit <PR#>` leva um PR de vermelho a verde sem auto-merge, resolve só as conversas que endereçou, respeita o cap de iterações, e deixa rastro auditável; nenhum assert é enfraquecido.
