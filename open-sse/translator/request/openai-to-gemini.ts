@@ -411,8 +411,6 @@ function openaiToGeminiBase(
             }
           }
 
-          const thinkingModel = isThinkingModel(model);
-          let shouldUseEmbeddedSignature = !parts.some((p) => p.thoughtSignature);
           const signaturelessToolCallMode = toolNameOptions.signaturelessToolCallMode;
           const stringifySignaturelessToolCalls = signaturelessToolCallMode === "text";
           const contextualizeSignaturelessToolResponses =
@@ -441,14 +439,13 @@ function openaiToGeminiBase(
             }
 
             const args = tryParseJSON(fn.arguments || "{}");
-            const embeddedThoughtSignature = thinkingModel
-              ? signatureForToolCall || firstPersistedSignature || DEFAULT_THINKING_GEMINI_SIGNATURE
-              : (shouldUseEmbeddedSignature ? firstPersistedSignature || signatureForToolCall : undefined);
-
-            if (embeddedThoughtSignature) {
-              shouldUseEmbeddedSignature = false;
-            }
-
+            // Gemini/Vertex thinking endpoints reject any historical native
+            // functionCall without thoughtSignature. Model aliases are not
+            // reliable enough to detect all thinking-backed Flash/Pro routes,
+            // so attach a safe fallback signature to every native historical
+            // functionCall when no cached signature is available.
+            const embeddedThoughtSignature =
+              signatureForToolCall || firstPersistedSignature || DEFAULT_THINKING_GEMINI_SIGNATURE;
             // Gemini expects the signature on the functionCall part itself.
             parts.push({
               ...(embeddedThoughtSignature ? { thoughtSignature: embeddedThoughtSignature } : {}),

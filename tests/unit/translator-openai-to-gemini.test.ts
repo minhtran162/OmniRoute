@@ -760,6 +760,47 @@ test("OpenAI -> Gemini Flash adds fallback thought signatures to native historic
   assert.equal((toolPart.functionCall as any).name, "CheckCommandStatus");
 });
 
+test("OpenAI -> Gemini adds fallback thought signatures to native historical tool calls for non-thinking aliases", () => {
+  const result = openaiToGeminiRequest(
+    "gemini-2.0-flash",
+    {
+      messages: [
+        { role: "user", content: "Search files" },
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              id: "call_grep",
+              type: "function",
+              function: { name: "Grep", arguments: '{"pattern":"foo"}' },
+            },
+          ],
+        },
+      ],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "Grep",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+      ],
+    },
+    false,
+    null,
+    { signaturelessToolCallMode: "native" }
+  );
+
+  const modelTurn = result.contents.find((content) => content.role === "model");
+  const toolPart = modelTurn?.parts.find((part) => part.functionCall);
+
+  assert.ok(toolPart, "expected historical functionCall part");
+  assert.equal(typeof toolPart.thoughtSignature, "string");
+  assert.ok((toolPart.thoughtSignature as string).length > 0);
+  assert.equal((toolPart.functionCall as any).name, "Grep");
+});
+
 test("OpenAI -> Antigravity preserves multiple signature-less historical tool responses as context", () => {
   const result = openaiToAntigravityRequest(
     "gemini-3.5-flash-low",
