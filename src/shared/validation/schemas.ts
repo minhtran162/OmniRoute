@@ -646,6 +646,7 @@ const comboRuntimeConfigSchema = z
     maxMessagesForSummary: z.coerce.number().int().min(5).max(100).optional(),
     maxComboDepth: z.coerce.number().int().min(1).max(10).optional(),
     trackMetrics: z.boolean().optional(),
+    reasoningTokenBufferEnabled: z.boolean().optional(),
     compressionMode: compressionModeSchema.optional(),
     failoverBeforeRetry: z.boolean().optional(),
     maxSetRetries: z.coerce.number().int().min(0).max(10).optional(),
@@ -751,6 +752,7 @@ export const updateSettingsSchema = z.object({
   hideEndpointCloudflaredTunnel: z.boolean().optional(),
   hideEndpointTailscaleFunnel: z.boolean().optional(),
   hideEndpointNgrokTunnel: z.boolean().optional(),
+  preferClaudeCodeForUnprefixedClaudeModels: z.boolean().optional(),
   pinProviderQuotaToHome: z.boolean().optional(),
   showQuickStartOnHome: z.boolean().optional(),
   showProviderTopologyOnHome: z.boolean().optional(),
@@ -913,24 +915,23 @@ export const v1CountTokensSchema = z
   })
   .catchall(z.unknown());
 
-export const setBudgetSchema = z
-  .object({
-    apiKeyId: z.string().trim().min(1, "apiKeyId is required"),
-    // #3537: a limit of 0 means "no limit for this period" (checkBudget only enforces when
-    // activeLimitUsd > 0). The dashboard sends 0 for unfilled fields, so 0 must be accepted —
-    // `.positive()` (rejects 0) used to 400 any save that left a field blank. Negatives are
-    // still rejected by `.min(0)`.
-    dailyLimitUsd: z.coerce.number().min(0, "dailyLimitUsd must be zero or greater").optional(),
-    weeklyLimitUsd: z.coerce.number().min(0, "weeklyLimitUsd must be zero or greater").optional(),
-    monthlyLimitUsd: z.coerce.number().min(0, "monthlyLimitUsd must be zero or greater").optional(),
-    warningThreshold: z.coerce.number().min(0).max(1).optional(),
-    resetInterval: z.enum(["daily", "weekly", "monthly"]).optional(),
-    resetTime: z
-      .string()
-      .trim()
-      .regex(/^\d{2}:\d{2}$/, "resetTime must be in HH:MM format")
-      .optional(),
-  });
+export const setBudgetSchema = z.object({
+  apiKeyId: z.string().trim().min(1, "apiKeyId is required"),
+  // #3537: a limit of 0 means "no limit for this period" (checkBudget only enforces when
+  // activeLimitUsd > 0). The dashboard sends 0 for unfilled fields, so 0 must be accepted —
+  // `.positive()` (rejects 0) used to 400 any save that left a field blank. Negatives are
+  // still rejected by `.min(0)`.
+  dailyLimitUsd: z.coerce.number().min(0, "dailyLimitUsd must be zero or greater").optional(),
+  weeklyLimitUsd: z.coerce.number().min(0, "weeklyLimitUsd must be zero or greater").optional(),
+  monthlyLimitUsd: z.coerce.number().min(0, "monthlyLimitUsd must be zero or greater").optional(),
+  warningThreshold: z.coerce.number().min(0).max(1).optional(),
+  resetInterval: z.enum(["daily", "weekly", "monthly"]).optional(),
+  resetTime: z
+    .string()
+    .trim()
+    .regex(/^\d{2}:\d{2}$/, "resetTime must be in HH:MM format")
+    .optional(),
+});
 // #3537: the previous superRefine required at least one limit > 0, which made it impossible to
 // clear all limits (save 0/0/0). Setting all limits to 0 is a valid "disable enforcement"
 // operation, so no cross-field minimum is imposed.
@@ -1230,6 +1231,12 @@ const pricingSyncSourceSchema = z.enum(["litellm"]);
 export const pricingSyncRequestSchema = z
   .object({
     sources: z.array(pricingSyncSourceSchema).min(1).optional(),
+    dryRun: z.boolean().optional(),
+  })
+  .strict();
+
+export const intelligenceSyncRequestSchema = z
+  .object({
     dryRun: z.boolean().optional(),
   })
   .strict();
@@ -1903,6 +1910,7 @@ export const updateKeyPermissionsSchema = z
   .object({
     name: z.string().trim().min(1).max(200).optional(),
     allowedModels: z.array(z.string().trim().min(1)).max(1000).optional(),
+    blockedModels: z.array(z.string().trim().min(1)).max(1000).optional(),
     allowedCombos: z.array(z.string().trim().min(1).max(200)).max(500).optional(),
     allowedConnections: z.array(z.string().uuid()).max(100).optional(),
     noLog: z.boolean().optional(),
@@ -1932,6 +1940,7 @@ export const updateKeyPermissionsSchema = z
     if (
       value.name === undefined &&
       value.allowedModels === undefined &&
+      value.blockedModels === undefined &&
       value.allowedCombos === undefined &&
       value.allowedConnections === undefined &&
       value.noLog === undefined &&

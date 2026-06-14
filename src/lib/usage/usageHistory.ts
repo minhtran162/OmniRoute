@@ -10,6 +10,7 @@
 import { getDbInstance } from "../db/core";
 import { protectPayloadForLog } from "../logPayloads";
 import { shouldPersistToDisk } from "./migrations";
+import { emitUsageRecorded } from "./usageEvents";
 import {
   getLoggedInputTokens,
   getLoggedOutputTokens,
@@ -591,6 +592,10 @@ export async function saveRequestUsage(entry: any) {
       entry.comboStrategy || entry.combo_strategy || null,
       timestamp
     );
+
+    // Decoupled via the event bus so usageHistory never imports providerLimits
+    // (which would pull the executors/translator graph into the type-check surface).
+    emitUsageRecorded(entry.provider, entry.connectionId);
   } catch (error) {
     console.error("Failed to save usage stats:", error);
   }

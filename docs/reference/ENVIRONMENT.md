@@ -224,11 +224,12 @@ OmniRoute provides a two-layer defense: request-side injection scanning and resp
 
 ## 6. Tool & Routing Policies
 
-| Variable                            | Default                      | Source File                         | Description                                                                                                                               |
-| ----------------------------------- | ---------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `TOOL_POLICY_MODE`                  | `disabled`                   | `src/lib/toolPolicy.ts`             | Controls LLM tool/function-calling access. `allowlist` = only listed tools, `denylist` = all except listed, `disabled` = no restrictions. |
-| `OMNIROUTE_PAYLOAD_RULES_PATH`      | `./config/payloadRules.json` | `open-sse/services/payloadRules.ts` | Path to payload manipulation rules JSON file (per-model/protocol upstream tweaks).                                                        |
-| `OMNIROUTE_PAYLOAD_RULES_RELOAD_MS` | `5000`                       | `open-sse/services/payloadRules.ts` | Reload interval (ms) for hot-reloading the payload rules file. Minimum `1000`.                                                            |
+| Variable                                                    | Default                      | Source File                         | Description                                                                                                                                                                                                                                                |
+| ----------------------------------------------------------- | ---------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TOOL_POLICY_MODE`                                          | `disabled`                   | `src/lib/toolPolicy.ts`             | Controls LLM tool/function-calling access. `allowlist` = only listed tools, `denylist` = all except listed, `disabled` = no restrictions.                                                                                                                  |
+| `OMNIROUTE_PAYLOAD_RULES_PATH`                              | `./config/payloadRules.json` | `open-sse/services/payloadRules.ts` | Path to payload manipulation rules JSON file (per-model/protocol upstream tweaks).                                                                                                                                                                         |
+| `OMNIROUTE_PAYLOAD_RULES_RELOAD_MS`                         | `5000`                       | `open-sse/services/payloadRules.ts` | Reload interval (ms) for hot-reloading the payload rules file. Minimum `1000`.                                                                                                                                                                             |
+| `OMNIROUTE_PREFER_CLAUDE_CODE_FOR_UNPREFIXED_CLAUDE_MODELS` | `false`                      | `open-sse/services/model.ts`        | Opt-in: route bare `claude-*` model IDs from Claude Code clients through the Claude Code OAuth account instead of requiring a provider prefix. Explicit provider prefixes still win. Also configurable via a dashboard toggle on the Claude provider page. |
 
 ---
 
@@ -270,12 +271,13 @@ Route upstream LLM provider calls through an HTTP or SOCKS5 proxy for egress con
 
 | Variable                                | Default   | Source File                                  | Description                                                                               |
 | --------------------------------------- | --------- | -------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `ENABLE_SOCKS5_PROXY`                   | `true`    | `open-sse/executors`                         | Enable SOCKS5 proxy agent for upstream calls.                                             |
+| `ENABLE_SOCKS5_PROXY`                   | `true`    | `open-sse/executors`                         | Enable SOCKS5 proxy agent for upstream calls. Opt-out with `false`.                       |
 | `NEXT_PUBLIC_ENABLE_SOCKS5_PROXY`       | `true`    | Client-side                                  | Client-side awareness of SOCKS5 availability.                                             |
 | `HTTP_PROXY`                            | _(unset)_ | Node.js standard                             | HTTP proxy for upstream calls.                                                            |
 | `HTTPS_PROXY`                           | _(unset)_ | Node.js standard                             | HTTPS proxy for upstream calls.                                                           |
 | `ALL_PROXY`                             | _(unset)_ | Node.js standard                             | Universal proxy (supports `socks5://`).                                                   |
 | `NO_PROXY`                              | _(unset)_ | Node.js standard                             | Comma-separated hostnames/IPs to bypass the proxy.                                        |
+| `PROXY_FAIL_OPEN`                       | `false`   | `src/sse/handlers/chatHelpers.ts`            | When `false` (default), a request whose assigned proxy fails to resolve is **refused (fail-closed)** rather than falling back to a direct connection — prevents real-IP leaks. Set `true` to restore the legacy DIRECT fallback. |
 | `ENABLE_TLS_FINGERPRINT`                | `false`   | `open-sse/executors`                         | Spoof TLS fingerprint using wreq-js (mimics Chrome 124). Counters JA3/JA4 blocking.       |
 | `OMNIROUTE_TURNSTILE_IGNORE_TLS_ERRORS` | `false`   | `open-sse/services/claudeTurnstileSolver.ts` | Allow the Claude Turnstile Playwright browser context to ignore HTTPS certificate errors. |
 
@@ -286,6 +288,15 @@ Route upstream LLM provider calls through an HTTP or SOCKS5 proxy for egress con
 | **SOCKS5 through SSH tunnel** | `ALL_PROXY=socks5://127.0.0.1:7890`, `ENABLE_SOCKS5_PROXY=true`                                                           |
 | **Corporate HTTP proxy**      | `HTTP_PROXY=http://proxy.corp.com:3128`, `HTTPS_PROXY=http://proxy.corp.com:3128`, `NO_PROXY=localhost,internal.corp.com` |
 | **Anti-fingerprint**          | `ENABLE_TLS_FINGERPRINT=true` — requires `wreq-js` (included)                                                             |
+| **Egress-controlled / no direct access** | Leave `PROXY_FAIL_OPEN=false` (default). Requests fail hard when the proxy is unavailable instead of leaking via direct. |
+| **Legacy / dev — allow direct fallback** | `PROXY_FAIL_OPEN=true`. Restores pre-hardening behaviour: direct connection used when proxy resolution fails.  |
+
+> **Note (NVIDIA validation bypass — #3226):** NVIDIA's API-key validation endpoint
+> stalls when routed through the global proxy/TLS-patched fetch (undici dispatcher → 504).
+> `src/lib/providers/validation.ts::directHttpsRequest()` intentionally bypasses the
+> proxy patch for that one validation call using `safeOutboundFetch({ bypassProxyPatch: true })`.
+> This is a documented, scoped exception — it does **not** affect chat/usage egress.
+> The bypass is scope-pinned by `tests/unit/proxy-bypass-scope-guard-3226.test.ts`.
 
 ---
 
@@ -293,22 +304,23 @@ Route upstream LLM provider calls through an HTTP or SOCKS5 proxy for egress con
 
 Controls how OmniRoute discovers and launches CLI sidecars (Claude Code, Codex, etc.).
 
-| Variable                  | Default    | Source File                         | Description                                                                        |
-| ------------------------- | ---------- | ----------------------------------- | ---------------------------------------------------------------------------------- |
-| `CLI_MODE`                | `auto`     | `src/shared/services/cliRuntime.ts` | `auto` = search system PATH; `manual` = use explicit paths only.                   |
-| `CLI_EXTRA_PATHS`         | _(unset)_  | `src/shared/services/cliRuntime.ts` | Additional PATH entries for CLI binary discovery (colon-separated).                |
-| `CLI_CONFIG_HOME`         | _(unset)_  | `src/shared/services/cliRuntime.ts` | Override home directory for reading CLI configs (`~/.claude`, `~/.codex`).         |
-| `CLI_ALLOW_CONFIG_WRITES` | `false`    | `src/shared/services/cliRuntime.ts` | Allow OmniRoute to write CLI config files (token refresh, session data).           |
-| `CLI_CLAUDE_BIN`          | `claude`   | `src/shared/services/cliRuntime.ts` | Custom path to Claude CLI binary.                                                  |
-| `CLI_CODEX_BIN`           | `codex`    | `src/shared/services/cliRuntime.ts` | Custom path to Codex CLI binary.                                                   |
-| `CLI_DROID_BIN`           | `droid`    | `src/shared/services/cliRuntime.ts` | Custom path to Droid CLI binary.                                                   |
-| `CLI_OPENCLAW_BIN`        | `openclaw` | `src/shared/services/cliRuntime.ts` | Custom path to OpenClaw CLI binary.                                                |
-| `CLI_CURSOR_BIN`          | `agent`    | `src/shared/services/cliRuntime.ts` | Custom path to Cursor agent binary.                                                |
-| `CLI_CLINE_BIN`           | `cline`    | `src/shared/services/cliRuntime.ts` | Custom path to Cline CLI binary.                                                   |
-| `CLI_CONTINUE_BIN`        | `cn`       | `src/shared/services/cliRuntime.ts` | Custom path to Continue CLI binary.                                                |
-| `CLI_QODER_BIN`           | `qoder`    | `src/shared/services/cliRuntime.ts` | Custom path to Qoder CLI binary.                                                   |
-| `CLI_QWEN_BIN`            | `qwen`     | `src/shared/services/cliRuntime.ts` | Custom path to the Qwen Code CLI binary.                                           |
-| `CLI_DEVIN_BIN`           | `devin`    | `open-sse/executors/devin-cli.ts`   | Custom path to the Devin CLI binary (v3.8.0). Used by the Windsurf/Devin executor. |
+| Variable                  | Default     | Source File                                         | Description                                                                                                                                                                    |
+| ------------------------- | ----------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CLI_MODE`                | `auto`      | `src/shared/services/cliRuntime.ts`                 | `auto` = search system PATH; `manual` = use explicit paths only.                                                                                                               |
+| `CLI_EXTRA_PATHS`         | _(unset)_   | `src/shared/services/cliRuntime.ts`                 | Additional PATH entries for CLI binary discovery (colon-separated).                                                                                                            |
+| `CLI_CONFIG_HOME`         | _(unset)_   | `src/shared/services/cliRuntime.ts`                 | Override home directory for reading CLI configs (`~/.claude`, `~/.codex`).                                                                                                     |
+| `CLI_ALLOW_CONFIG_WRITES` | `false`     | `src/shared/services/cliRuntime.ts`                 | Allow OmniRoute to write CLI config files (token refresh, session data).                                                                                                       |
+| `CLI_CLAUDE_BIN`          | `claude`    | `src/shared/services/cliRuntime.ts`                 | Custom path to Claude CLI binary.                                                                                                                                              |
+| `CLI_CODEX_BIN`           | `codex`     | `src/shared/services/cliRuntime.ts`                 | Custom path to Codex CLI binary.                                                                                                                                               |
+| `CLI_DROID_BIN`           | `droid`     | `src/shared/services/cliRuntime.ts`                 | Custom path to Droid CLI binary.                                                                                                                                               |
+| `CLI_OPENCLAW_BIN`        | `openclaw`  | `src/shared/services/cliRuntime.ts`                 | Custom path to OpenClaw CLI binary.                                                                                                                                            |
+| `CLI_CURSOR_BIN`          | `agent`     | `src/shared/services/cliRuntime.ts`                 | Custom path to Cursor agent binary.                                                                                                                                            |
+| `CLI_CLINE_BIN`           | `cline`     | `src/shared/services/cliRuntime.ts`                 | Custom path to Cline CLI binary.                                                                                                                                               |
+| `CLI_CONTINUE_BIN`        | `cn`        | `src/shared/services/cliRuntime.ts`                 | Custom path to Continue CLI binary.                                                                                                                                            |
+| `CLI_QODER_BIN`           | `qoder`     | `src/shared/services/cliRuntime.ts`                 | Custom path to Qoder CLI binary.                                                                                                                                               |
+| `CLI_QWEN_BIN`            | `qwen`      | `src/shared/services/cliRuntime.ts`                 | Custom path to the Qwen Code CLI binary.                                                                                                                                       |
+| `CLI_DEVIN_BIN`           | `devin`     | `open-sse/executors/devin-cli.ts`                   | Custom path to the Devin CLI binary (v3.8.0). Used by the Windsurf/Devin executor.                                                                                             |
+| `HERMES_HOME`             | `~/.hermes` | `src/lib/cli-helper/config-generator/hermesHome.ts` | Hermes Agent home directory where OmniRoute reads/writes the Hermes CLI config. Matches the env var the Hermes PowerShell installer sets on Windows (`%LOCALAPPDATA%\hermes`). |
 
 ### Docker Example
 
@@ -352,6 +364,7 @@ detection above).
 | `MODEL_SYNC_INTERVAL_HOURS`                     | `24`                                                | `src/shared/services/modelSyncScheduler.ts`                 | Model catalog sync interval in hours.                                                                                                                                  |
 | `PROVIDER_LIMITS_SYNC_INTERVAL_MINUTES`         | `70`                                                | `src/server-init.ts`                                        | Provider rate-limit and quota polling interval.                                                                                                                        |
 | `PROVIDER_LIMITS_SYNC_SPACING_MS`               | `1500`                                              | `src/lib/usage/providerLimits.ts`                           | Gap (ms) between consecutive OAuth quota fetches in a bulk sync; OAuth connections are fetched one at a time to avoid bursting an upstream. `0` opts out (concurrent). |
+| `PROVIDER_LIMITS_POST_USAGE_REFRESH_DELAY_MS`   | `5000`                                              | `src/lib/usage/providerLimits.ts`                           | Delay (ms) before refreshing provider limits after a real usage event, giving the upstream quota API time to register consumption.                                     |
 | `OMNIROUTE_DISABLE_BACKGROUND_SERVICES`         | `false`                                             | `src/instrumentation-node.ts`                               | Disable all background services (sync, pricing, model refresh). Useful for CI/test.                                                                                    |
 | `OMNIROUTE_ENABLE_RUNTIME_BACKGROUND_TASKS`     | _(unset)_                                           | `src/lib/config/runtimeSettings.ts`                         | Force background tasks on under automated test detection. Set `1` to override the test heuristic.                                                                      |
 | `OMNIROUTE_BUDGET_RESET_JOB_INTERVAL_MS`        | `600000`                                            | `src/lib/jobs/budgetResetJob.ts`                            | Budget reset check cadence (ms). Floor `10000`.                                                                                                                        |
@@ -682,6 +695,15 @@ Automatic model pricing data synchronization from external sources.
 
 ---
 
+## Arena ELO Sync
+
+| Variable                    | Default       | Source File                | Description                                                   |
+| --------------------------- | ------------- | -------------------------- | ------------------------------------------------------------- |
+| `ARENA_ELO_SYNC_ENABLED`    | `false`       | `src/lib/arenaEloSync.ts`  | Opt-in periodic Arena AI leaderboard ELO sync.                |
+| `ARENA_ELO_SYNC_INTERVAL`   | `86400` (24h) | `src/lib/arenaEloSync.ts`  | Sync interval in seconds.                                     |
+
+---
+
 ## 19. Model Sync (Dev)
 
 | Variable                   | Default       | Source File                | Description                                              |
@@ -723,18 +745,18 @@ Anthropic-compatible provider instead.
 
 ## 21. Proxy Health
 
-| Variable                     | Default          | Source File                              | Description                                                                                                                                                            |
-| ---------------------------- | ---------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PROXY_FAST_FAIL_TIMEOUT_MS` | `2000`           | `src/lib/proxyHealth.ts`                 | Fast-fail health check timeout.                                                                                                                                        |
-| `PROXY_HEALTH_CACHE_TTL_MS`  | `30000`          | `src/lib/proxyHealth.ts`                 | Health check result cache TTL.                                                                                                                                         |
-| `RATE_LIMIT_MAX_WAIT_MS`     | `120000` (2 min) | `open-sse/services/rateLimitManager.ts`  | Max time to wait on a 429 before failing the request.                                                                                                                  |
-| `RATE_LIMIT_AUTO_ENABLE`     | _(unset)_        | `open-sse/services/rateLimitManager.ts`  | Force the auto-enable rate limit safety net on/off regardless of the persisted Dashboard setting. Accepts `true`/`1`/`on` to force on, `false`/`0`/`off` to force off. |
+| Variable                     | Default          | Source File                                    | Description                                                                                                                                                                     |
+| ---------------------------- | ---------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PROXY_FAST_FAIL_TIMEOUT_MS` | `2000`           | `src/lib/proxyHealth.ts`                       | Fast-fail health check timeout.                                                                                                                                                 |
+| `PROXY_HEALTH_CACHE_TTL_MS`  | `30000`          | `src/lib/proxyHealth.ts`                       | Health check result cache TTL.                                                                                                                                                  |
+| `RATE_LIMIT_MAX_WAIT_MS`     | `120000` (2 min) | `open-sse/services/rateLimitManager.ts`        | Max time to wait on a 429 before failing the request.                                                                                                                           |
+| `RATE_LIMIT_AUTO_ENABLE`     | _(unset)_        | `open-sse/services/rateLimitManager.ts`        | Force the auto-enable rate limit safety net on/off regardless of the persisted Dashboard setting. Accepts `true`/`1`/`on` to force on, `false`/`0`/`off` to force off.          |
 | `PROVIDER_COOLDOWN_ENABLED`  | _(unset → off)_  | `open-sse/services/providerCooldownTracker.ts` | Opt-in global cross-request provider/connection cooldown tracking. OFF by default (overlaps Connection Cooldown / Provider Circuit Breaker). Accepts `true`/`1`/`on` to enable. |
-| `PROVIDER_COOLDOWN_MIN_MS`   | `5000`           | `open-sse/services/providerCooldownTracker.ts` | Minimum cooldown (ms) before a failed provider/connection is retried. Scaled exponentially with consecutive failures. Only used when `PROVIDER_COOLDOWN_ENABLED`.       |
-| `PROVIDER_COOLDOWN_MAX_MS`   | `300000` (5 min) | `open-sse/services/providerCooldownTracker.ts` | Maximum cooldown (ms) cap before a failed provider/connection is retried regardless. Only used when `PROVIDER_COOLDOWN_ENABLED`.                                        |
-| `HEALTHCHECK_STAGGER_MS`     | `3000`           | `src/lib/tokenHealthCheck.ts`            | Stagger interval (ms) between provider token healthchecks at startup.                                                                                                  |
-| `REQUEST_RETRY`              | `2`              | `src/sse/services/cooldownAwareRetry.ts` | Number of automatic retries on model-scoped cooldown responses before returning error to client.                                                                       |
-| `MAX_RETRY_INTERVAL_SEC`     | `30`             | `src/sse/services/cooldownAwareRetry.ts` | Max backoff interval (seconds) between cooldown retries. Capped by this value regardless of upstream `Retry-After`.                                                    |
+| `PROVIDER_COOLDOWN_MIN_MS`   | `5000`           | `open-sse/services/providerCooldownTracker.ts` | Minimum cooldown (ms) before a failed provider/connection is retried. Scaled exponentially with consecutive failures. Only used when `PROVIDER_COOLDOWN_ENABLED`.               |
+| `PROVIDER_COOLDOWN_MAX_MS`   | `300000` (5 min) | `open-sse/services/providerCooldownTracker.ts` | Maximum cooldown (ms) cap before a failed provider/connection is retried regardless. Only used when `PROVIDER_COOLDOWN_ENABLED`.                                                |
+| `HEALTHCHECK_STAGGER_MS`     | `3000`           | `src/lib/tokenHealthCheck.ts`                  | Stagger interval (ms) between provider token healthchecks at startup.                                                                                                           |
+| `REQUEST_RETRY`              | `2`              | `src/sse/services/cooldownAwareRetry.ts`       | Number of automatic retries on model-scoped cooldown responses before returning error to client.                                                                                |
+| `MAX_RETRY_INTERVAL_SEC`     | `30`             | `src/sse/services/cooldownAwareRetry.ts`       | Max backoff interval (seconds) between cooldown retries. Capped by this value regardless of upstream `Retry-After`.                                                             |
 
 ---
 
@@ -862,6 +884,7 @@ Provider quota endpoints, network tunnels (Tailscale, Ngrok, MITM debug proxy), 
 | `ALIBABA_CODING_PLAN_QUOTA_URL`            | derived from host                                                           | `open-sse/services/bailianQuotaFetcher.ts`                                | Full quota URL override for Alibaba Bailian.                                                                                                                                  |
 | `CONTEXT_RESERVE_TOKENS`                   | `1024`                                                                      | `open-sse/services/contextManager.ts`                                     | Tokens reserved for completion output when computing prompt budgets.                                                                                                          |
 | `MODEL_ALIAS_COMPAT_ENABLED`               | enabled                                                                     | `open-sse/services/model.ts`                                              | Toggle the legacy model-alias compatibility layer used by older clients.                                                                                                      |
+| `OMNIROUTE_EMERGENCY_FALLBACK`             | enabled                                                                     | `open-sse/services/emergencyFallback.ts`                                  | Set `false` (or `0`) to disable the emergency budget-exhaustion fallback that reroutes failed requests to the free `nvidia`/`openai/gpt-oss-120b` model. Effective precedence is Feature Flags DB override > env var > default; if unavailable, the service falls back to the raw env value. |
 | `COMMAND_CODE_CALLBACK_PORT`               | _(unset)_                                                                   | `src/app/api/providers/command-code/auth/shared.ts`                       | Local port used for OAuth-style callbacks from the Command Code CLI helper.                                                                                                   |
 | `COMMAND_CODE_VERSION`                     | `0.33.2`                                                                    | `open-sse/executors/commandCode.ts`                                       | Value sent as the `x-command-code-version` header to the Command Code upstream. Override to bump the CLI version.                                                             |
 | `MITM_LOCAL_PORT`                          | `443`                                                                       | `src/mitm/server.cjs`                                                     | Local bind port for the MITM debug proxy.                                                                                                                                     |

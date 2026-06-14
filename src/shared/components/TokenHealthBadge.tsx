@@ -82,7 +82,7 @@ export default function TokenHealthBadge() {
             </div>
             <div className="flex justify-between">
               <span className="text-emerald-400">{t("healthy")}</span>
-              <span className="text-text-muted">{health.healthy}</span>
+              <span className="text-emerald-400">{health.healthy}</span>
             </div>
             {health.errored > 0 && (
               <div className="flex justify-between">
