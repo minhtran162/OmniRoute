@@ -22,17 +22,6 @@ function generateUUID() {
   return crypto.randomUUID();
 }
 
-function isThinkingModel(model: string): boolean {
-  const m = model.toLowerCase();
-  return (
-    m.includes("think") ||
-    m.includes("r1") ||
-    m.includes("reason") ||
-    m.includes("pro") ||
-    m.includes("flash")
-  );
-}
-
 import {
   DEFAULT_SAFETY_SETTINGS,
   convertOpenAIContentToParts,
@@ -403,6 +392,7 @@ function openaiToGeminiBase(
             }
           }
 
+          let shouldUseEmbeddedSignature = !parts.some((p) => p.thoughtSignature);
           const signaturelessToolCallMode = toolNameOptions.signaturelessToolCallMode;
           const stringifySignaturelessToolCalls = signaturelessToolCallMode === "text";
           const contextualizeSignaturelessToolResponses =
@@ -439,13 +429,14 @@ function openaiToGeminiBase(
             }
 
             const args = tryParseJSON(fn.arguments || "{}");
-            // Gemini/Vertex thinking endpoints reject any historical native
-            // functionCall without thoughtSignature. Model aliases are not
-            // reliable enough to detect all thinking-backed Flash/Pro routes,
-            // so attach a safe fallback signature to every native historical
-            // functionCall when no cached signature is available.
-            const embeddedThoughtSignature =
-              signatureForToolCall || firstPersistedSignature || DEFAULT_THINKING_GEMINI_SIGNATURE;
+            const embeddedThoughtSignature = shouldUseEmbeddedSignature
+              ? firstPersistedSignature || signatureForToolCall
+              : undefined;
+
+            if (embeddedThoughtSignature) {
+              shouldUseEmbeddedSignature = false;
+            }
+
             // Gemini expects the signature on the functionCall part itself.
             // If we are in a mode where missing signatures cause 400s (and we couldn't find one),
             // safely default to the bypass string to protect against 400s.
@@ -823,11 +814,10 @@ export function openaiToAntigravityRequest(model, body, stream, credentials = nu
 register(
   FORMATS.OPENAI,
   FORMATS.GEMINI,
-  (model, body, stream = false, credentials = null) => {
+  (model, body, stream = false, credentials = null) =>
     openaiToGeminiRequest(model, body, stream, credentials, {
-      signaturelessToolCallMode: isThinkingModel(model) ? "context" : "native",
-    });
-  },
+      signaturelessToolCallMode: "native",
+    }),
   null
 );
 register(

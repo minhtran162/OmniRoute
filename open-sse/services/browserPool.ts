@@ -152,7 +152,7 @@ interface ResolvePlaywrightProxyDeps {
 // Exported for tests (deps injection avoids mock.module()).
 export async function resolvePlaywrightProxy(
   providerKey: string,
-  deps?: ResolvePlaywrightProxyDeps
+  deps?: ResolvePlaywrightProxyDeps,
 ): Promise<import("playwright").LaunchOptions["proxy"] | undefined> {
   try {
     const resolver =

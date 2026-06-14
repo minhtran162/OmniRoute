@@ -2142,7 +2142,7 @@ async function probeAntigravityCreditBalanceUncached(
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(10_000),
         });
-        
+
         if (!res.ok) continue;
 
         // Read the full SSE response and scan for remainingCredits
@@ -2721,74 +2721,21 @@ async function getKiroUsage(accessToken?: string, providerSpecificData?: JsonRec
       resourceType: "AGENTIC_REQUEST",
     };
 
-  const attempts = [
-    {
-      name: "codewhisperer-get",
-      run: async () =>
-        fetch(
-          `https://codewhisperer.us-east-1.amazonaws.com/getUsageLimits?${getUsageParams.toString()}`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              Accept: "application/json",
-              "x-amz-user-agent": "aws-sdk-js/1.0.0 KiroIDE",
-              "user-agent": "aws-sdk-js/1.0.0 KiroIDE",
-            },
-          }
-        ),
-    },
-    {
-      name: "codewhisperer-post",
-      run: async () =>
-        fetch("https://codewhisperer.us-east-1.amazonaws.com", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/x-amz-json-1.0",
-            "x-amz-target": "AmazonCodeWhispererService.GetUsageLimits",
-            Accept: "application/json",
-          },
-          body: JSON.stringify({
-            origin: "AI_EDITOR",
-            profileArn,
-            resourceType: "AGENTIC_REQUEST",
-          }),
-        }),
-    },
-    {
-      name: "q-get",
-      run: async () => {
-        const params = new URLSearchParams({
-          origin: "AI_EDITOR",
-          profileArn,
-          resourceType: "AGENTIC_REQUEST",
-        });
-        return fetch(`https://q.us-east-1.amazonaws.com/getUsageLimits?${params}`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            Accept: "application/json",
-          },
-        });
+    const response = await fetch(CODEWHISPERER_BASE_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/x-amz-json-1.0",
+        "x-amz-target": "AmazonCodeWhispererService.GetUsageLimits",
+        Accept: "application/json",
       },
-    },
-  ];
+      body: JSON.stringify(payload),
+    });
 
-  let sawAuthError = false;
-  const errors = [];
-
-  for (const attempt of attempts) {
-    try {
-      const response = await attempt.run();
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => "");
-        if (response.status === 401 || response.status === 403) {
-          sawAuthError = true;
-        }
-        errors.push(`${attempt.name}:${response.status}${errorText ? `:${errorText}` : ""}`);
-        continue;
-      }
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Kiro API error (${response.status}): ${errorText}`);
+    }
 
     const data = toRecord(await response.json());
     return buildKiroUsageResult(data);
