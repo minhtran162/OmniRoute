@@ -1,6 +1,7 @@
 import { getModelInfo, getComboForModel } from "../services/model";
 import { clearAccountError, markAccountUnavailable } from "../services/auth";
 import { connectionHasExtraKeys } from "@omniroute/open-sse/services/apiKeyRotator.ts";
+import { createBuiltinAutoCombo } from "@omniroute/open-sse/services/autoCombo/builtinCatalog.ts";
 import * as log from "../utils/logger";
 import { updateProviderCredentials } from "../services/tokenRefresh";
 import {
@@ -173,18 +174,20 @@ export async function resolveModelOrError(
     }
   }
 
-  // "auto" is a combo prefix, not a provider. parseModel("auto/fast") splits it into
-  // provider="auto" model="fast" — redirect to matching combo before credential lookup fails.
+  // "auto" is a built-in virtual combo prefix, not a provider. parseModel("auto/fast")
+  // splits it into provider="auto" model="fast", so resolve it before credential lookup.
   if (modelInfo.provider === "auto") {
+    const suffix = modelInfo.model || "";
+    const fuzzyCandidates = [`auto/best-${suffix}`, `auto/${suffix}`];
+
     const exactCombo = await getComboForModel(modelStr);
     if (exactCombo) {
       log.info("ROUTING", `"auto" provider → combo "${modelStr}"`);
-      return { combo: exactCombo, provider: "auto", model: modelInfo.model };
+      return { combo: exactCombo, provider: "auto", model: suffix };
     }
 
-    // Fuzzy: "fast" → "auto/best-fast", "chat" → "auto/best-chat"
-    const suffix = modelInfo.model || "";
-    for (const candidate of [`auto/best-${suffix}`, `auto/${suffix}`]) {
+    // Preserve persisted fuzzy combo behavior before falling back to built-in virtual catalog ids.
+    for (const candidate of fuzzyCandidates) {
       const fuzzyCombo = await getComboForModel(candidate);
       if (fuzzyCombo) {
         log.info("ROUTING", `"auto/${suffix}" → combo "${candidate}" (fuzzy)`);
@@ -192,25 +195,35 @@ export async function resolveModelOrError(
       }
     }
 
-    // List available auto/* combos in error
-    const available: string[] = [];
     try {
-      const { getCombos } = await import("@/lib/localDb");
-      const all = await getCombos();
-      for (const c of all) {
-        const name =
-          typeof c === "object" && c !== null ? (c as Record<string, unknown>).name : undefined;
-        if (typeof name === "string" && name.startsWith("auto/")) available.push(name);
-      }
-    } catch {
-      /* DB unavailable */
+      const virtualCombo = await createBuiltinAutoCombo(modelStr, suffix);
+      log.info(
+        "AUTO",
+        `"auto" provider → built-in virtual combo "${modelStr}" (${virtualCombo.candidatePool?.length || 0} candidates)`
+      );
+      return { combo: virtualCombo, provider: "auto", model: suffix };
+    } catch (err) {
+      log.warn("CHAT", `Failed to create built-in auto combo "${modelStr}"`, { err });
     }
 
-    const hint =
-      available.length > 0
-        ? ` Available auto combos: ${available.join(", ")}`
-        : " No auto combos configured — create one in the Dashboard.";
-    const message = `Model '${modelStr}' is not a valid combo or provider.${hint}`;
+    // Fuzzy: "fast" → "auto/best-fast", "chat" → "auto/best-chat"
+    for (const candidate of fuzzyCandidates) {
+      try {
+        const virtualCombo = await createBuiltinAutoCombo(
+          candidate,
+          candidate.replace(/^auto\/?/, "")
+        );
+        log.info(
+          "AUTO",
+          `"auto/${suffix}" → built-in virtual combo "${candidate}" (fuzzy, ${virtualCombo.candidatePool?.length || 0} candidates)`
+        );
+        return { combo: virtualCombo, provider: "auto", model: suffix };
+      } catch {
+        /* Try next fuzzy candidate */
+      }
+    }
+
+    const message = `Model '${modelStr}' is not a valid combo or provider. Unknown built-in auto combo.`;
     log.warn("CHAT", message, { model: modelStr });
     return { error: errorResponse(HTTP_STATUS.BAD_REQUEST, message) };
   }
@@ -580,6 +593,35 @@ export function handleNoCredentials(
     lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE,
     lastError || "All accounts unavailable"
   );
+}
+
+/**
+ * Bug #3758 (Problem A): NVIDIA NIM (and other flaky OpenAI-compatible upstreams)
+ * intermittently send HTTP 200, then close the SSE early with zero useful frames.
+ * The readiness gate surfaces this as `STREAM_EARLY_EOF` / HTTP 502. On the
+ * single-model (non-combo) path that 502 used to be returned immediately for every
+ * provider except `antigravity`, so a transient upstream hang-up looked like a hard
+ * failure to the caller (e.g. the test-chat scenario).
+ *
+ * This decides whether a single-model request should re-attempt after an early
+ * close. It deliberately:
+ *  - retries ONLY on `STREAM_EARLY_EOF` (the strong "upstream hung up after 200"
+ *    signal) — NOT on `STREAM_READINESS_TIMEOUT` / `stream_timeout`, which is a
+ *    slow-but-alive upstream where retrying would only double latency; and
+ *  - is bounded to exactly ONE retry via the per-request `attempt` counter, so it
+ *    can never loop (the second consecutive early close surfaces the 502).
+ *
+ * Pure function (no side effects): the caller performs a plain same-connection
+ * re-attempt and must NOT mark the account unavailable for an early close — it is a
+ * transient upstream glitch, not a bad key.
+ */
+export const STREAM_EARLY_EOF_MAX_RETRIES = 1;
+
+export function shouldRetryStreamEarlyEof(
+  errorCode: string | null | undefined,
+  attempt: number
+): boolean {
+  return errorCode === "STREAM_EARLY_EOF" && attempt < STREAM_EARLY_EOF_MAX_RETRIES;
 }
 
 /**

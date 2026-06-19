@@ -35,7 +35,7 @@ For full test matrix, see `CONTRIBUTING.md` → "Running Tests". For deep archit
 
 ## Project at a Glance
 
-**OmniRoute** — unified AI proxy/router. One endpoint, 160+ LLM providers, auto-fallback.
+**OmniRoute** — unified AI proxy/router. One endpoint, 227 LLM providers, auto-fallback.
 
 | Layer         | Location                | Purpose                                                                                                                                |
 | ------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -332,7 +332,7 @@ For any non-trivial change, read the matching deep-dive first:
 | Repo navigation                              | `docs/architecture/REPOSITORY_MAP.md`                             |
 | Architecture                                 | `docs/architecture/ARCHITECTURE.md`                               |
 | Engineering reference                        | `docs/architecture/CODEBASE_DOCUMENTATION.md`                     |
-| Auto-Combo (9-factor scoring, 15 strategies) | `docs/routing/AUTO-COMBO.md`                                      |
+| Auto-Combo (9-factor scoring, 14 strategies) | `docs/routing/AUTO-COMBO.md`                                      |
 | Resilience (3 mechanisms)                    | `docs/architecture/RESILIENCE_GUIDE.md`                           |
 | Reasoning replay                             | `docs/routing/REASONING_REPLAY.md`                                |
 | Skills framework                             | `docs/frameworks/SKILLS.md`                                       |
@@ -353,7 +353,6 @@ For any non-trivial change, read the matching deep-dive first:
 | Provider catalog (auto-generated)            | `docs/reference/PROVIDER_REFERENCE.md`                            |
 | Release flow                                 | `docs/ops/RELEASE_CHECKLIST.md`                                   |
 | Embedded services                            | `docs/frameworks/EMBEDDED-SERVICES.md`                            |
-| Quality gates (35 gates, allowlist policy)   | `docs/architecture/QUALITY_GATES.md`                              |
 
 ---
 
@@ -404,7 +403,7 @@ git push -u origin feat/your-feature
 **Husky hooks**:
 
 - **pre-commit**: lint-staged + `check-docs-sync` + `check:any-budget:t11`
-- **pre-push**: fast deterministic gates (`check:any-budget:t11` + `check:tracked-artifacts`); intentionally excludes `test:unit` (slow — covered by the CI `test-unit` job). Activated 2026-06-13 (Quality Gates Fase 6A.12).
+- **pre-push**: `npm run test:unit`
 
 ---
 
@@ -417,29 +416,6 @@ git push -u origin feat/your-feature
 - **Data directory**: `DATA_DIR` env var, defaults to `~/.omniroute/`
 - **Key env vars**: `PORT`, `JWT_SECRET`, `API_KEY_SECRET`, `INITIAL_PASSWORD`, `REQUIRE_API_KEY`, `APP_LOG_LEVEL`
 - Setup: `cp .env.example .env` then generate `JWT_SECRET` (`openssl rand -base64 48`) and `API_KEY_SECRET` (`openssl rand -hex 32`)
-
----
-
-## Quality Gates & Ratchets
-
-OmniRoute has **35 CI quality gates** wired across 6 jobs in `.github/workflows/ci.yml`.
-Full inventory, per-job breakdown, and operational procedures are in
-[`docs/architecture/QUALITY_GATES.md`](docs/architecture/QUALITY_GATES.md).
-
-**Quick reference:**
-
-- Gates in job `lint` (18 checks) + `docs-sync-strict` (12 checks): pass/fail policy gates —
-  fix the violation or add an allowlist entry with a justification comment + tracking issue.
-- Gates in job `quality-gate`: ratchet — metrics (ESLint warnings, code coverage, duplication,
-  complexity) must not regress vs `quality-baseline.json`. Update via
-  `npm run quality:ratchet -- --update` when a metric genuinely improves.
-- Job `test-vitest` runs `npm run test:vitest` (MCP tools, autoCombo, cache) — blocking.
-  `test:vitest:ui` is advisory until UI component tests are triaged.
-
-**Allowlist policy (short form):** Fix the cause; use the allowlist only for pre-existing
-violations you cannot fix in the same PR. Add a comment with justification + issue number.
-Stale allowlist entries (suppressing a violation that no longer exists) will be caught by
-the stale-enforcement added in Fase 6A.3.
 
 ---
 
@@ -463,6 +439,7 @@ the stale-enforcement added in Fase 6A.3.
 16. Never include `Co-Authored-By` trailers that credit an AI assistant, LLM, or automation account (e.g. names containing "Claude", "GPT", "Copilot", "Bot"; emails at `anthropic.com` / `openai.com` / bot-owned `noreply.github.com` addresses). Such trailers route attribution to the bot account on GitHub, hiding the real author (`diegosouzapw`) in PR history. Human collaborators — including upstream PR authors and issue reporters being ported into OmniRoute — MAY and SHOULD be credited with standard `Co-authored-by: Name <email>` trailers; the upstream-port workflows (`/port-upstream-features`, `/port-upstream-issues`) depend on this.
 17. Never expose routes under `/api/services/` or `/dashboard/providers/services/*/embed/` without `isLocalOnlyPath()` classification in `src/server/authz/routeGuard.ts`. These routes can spawn child processes (`npm install`, `node`). Loopback enforcement happens unconditionally before any auth check — a leaked JWT via tunnel cannot trigger process spawning. See `docs/security/ROUTE_GUARD_TIERS.md`.
 18. Every bug fix must be validated before shipping: a failing-then-passing unit/integration test (TDD) OR a documented live test on the production VPS (192.168.0.15). A fix without either is not merged. See Testing → "Bug fix / issue triage protocol" for the full decision tree.
+19. Never develop on the shared main checkout. Every development task runs in its own git worktree on its own dedicated branch, and you MUST confirm the base branch with the operator (e.g. via `AskUserQuestion`) before creating the worktree/branch — never assume `main` or the currently checked-out branch. A `git checkout` in the shared checkout silently destroys other sessions' uncommitted work. Tear down only the worktrees/branches you created (by name, never `fix/*`/`feat/*` wildcards), leave other sessions' worktrees untouched, and end on the branch you started on (the active `release/vX.Y.Z`, never `main`). See Git Workflow → "Worktree isolation".
 
 ---
 

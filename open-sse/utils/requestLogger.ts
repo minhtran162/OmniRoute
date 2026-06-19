@@ -48,6 +48,7 @@ type RequestLoggerOptions = {
   captureStreamChunks?: boolean;
   maxStreamChunkBytes?: number;
   maxStreamChunkItems?: number;
+  requestId?: string | null;
   model?: string;
   provider?: string;
   connectionId?: string | null;
@@ -238,22 +239,32 @@ function makeStreamChunkMethods(options: RequestLoggerOptions, captureChunks: bo
 
   const push = () => {
     if (pendingPushed) return;
-    if (!options.connectionId || !options.model) return;
+    if (!options.requestId && (!options.connectionId || !options.model)) return;
     pendingPushed = true;
-      try {
-        const pending = getPendingById();
-        for (const entry of pending.values()) {
-          if (entry?.model === options.model && entry.provider === (options.provider || "")) {
-            entry.streamChunks = { ...streamChunks };
-            return;
-          }
-        }
-      } catch (e) {
-        // Do not allow logging failures to disrupt request handling
-        try {
-          console.warn("[requestLogger] updatePendingRequestStreamChunks failed:", e);
-        } catch {}
+    try {
+      const pending = getPendingById();
+      const exactEntry = options.requestId ? pending.get(options.requestId) : null;
+      if (exactEntry) {
+        exactEntry.streamChunks = { ...streamChunks };
+        return;
       }
+
+      for (const entry of pending.values()) {
+        if (
+          entry?.connectionId === options.connectionId &&
+          entry?.model === options.model &&
+          entry?.provider === (options.provider || "")
+        ) {
+          entry.streamChunks = { ...streamChunks };
+          return;
+        }
+      }
+    } catch (e) {
+      // Do not allow logging failures to disrupt request handling
+      try {
+        console.warn("[requestLogger] updatePendingRequestStreamChunks failed:", e);
+      } catch {}
+    }
   };
 
   const append = (arr: string[], bytes: { value: number; truncated: boolean }, chunk: string) => {

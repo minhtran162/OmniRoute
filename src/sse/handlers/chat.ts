@@ -29,6 +29,10 @@ import {
   PROVIDER_ID_TO_ALIAS,
 } from "@omniroute/open-sse/config/providerModels.ts";
 import type { AutoVariant } from "@omniroute/open-sse/services/autoCombo/autoPrefix.ts";
+import {
+  AUTO_TEMPLATE_VARIANTS,
+  VALID_AUTO_VARIANTS,
+} from "@omniroute/open-sse/services/autoCombo/builtinCatalog.ts";
 import * as log from "../utils/logger";
 import { checkAndRefreshToken } from "../services/tokenRefresh";
 import { createHookContext, runHooks, initPreRequestRegistry } from "@/lib/middleware/registry";
@@ -53,6 +57,7 @@ import {
   handleNoCredentials,
   safeResolveProxy,
   safeLogEvents,
+  shouldRetryStreamEarlyEof,
   withSessionHeader,
 } from "./chatHelpers";
 import { connectionHasExtraKeys } from "@omniroute/open-sse/services/apiKeyRotator.ts";
@@ -67,6 +72,7 @@ import { generateRequestId } from "../../shared/utils/requestId";
 import { logAuditEvent } from "../../lib/compliance/index";
 import { enforceApiKeyPolicy } from "../../shared/utils/apiKeyPolicy";
 import { cloneLogPayload } from "@/lib/logPayloads";
+import { handleInternalUsageCommand } from "@/lib/usage/internalUsageCommand";
 import {
   applyTaskAwareRouting,
   getTaskRoutingConfig,
@@ -98,10 +104,7 @@ import {
   resolveCooldownAwareRetrySettings,
   waitForCooldownAwareRetry,
 } from "../services/cooldownAwareRetry";
-import {
-  constrainConnectionsToQuota,
-  resolveQuotaKeyScope,
-} from "../../lib/quota/quotaKey";
+import { constrainConnectionsToQuota, resolveQuotaKeyScope } from "../../lib/quota/quotaKey";
 
 registerCodexQuotaFetcher();
 
@@ -243,6 +246,12 @@ export async function handleChat(request: any, clientRawRequest: any = null) {
     log.debug("AUTH", "No API key provided (local mode)");
   }
 
+  const internalUsageCommandResponse = await handleInternalUsageCommand(request, body);
+  if (internalUsageCommandResponse) {
+    recordTelemetry(telemetry);
+    return internalUsageCommandResponse;
+  }
+
   const isComboLiveTest = request.headers?.get?.("x-internal-test") === "combo-health-check";
 
   if (!modelStr) {
@@ -374,6 +383,15 @@ export async function handleChat(request: any, clientRawRequest: any = null) {
   // entirely and generate a virtual auto-combo on-the-fly from connected providers.
   let autoVariant: AutoVariant | undefined;
   let isAutoRouting = resolvedModelStr === "auto" || resolvedModelStr.startsWith("auto/");
+  let recognizedBuiltInAuto = resolvedModelStr === "auto";
+  if (Object.prototype.hasOwnProperty.call(AUTO_TEMPLATE_VARIANTS, resolvedModelStr)) {
+    recognizedBuiltInAuto = true;
+    autoVariant = AUTO_TEMPLATE_VARIANTS[resolvedModelStr];
+  } else if (resolvedModelStr.startsWith("auto/")) {
+    const suffix = resolvedModelStr.slice(5);
+    recognizedBuiltInAuto = VALID_AUTO_VARIANTS.has(suffix as AutoVariant);
+  }
+
   if (isAutoRouting) {
     // C2: Enforce autoRoutingEnabled setting.
     // Issue #2346: `getSettings` was never imported in this module; only
@@ -393,9 +411,15 @@ export async function handleChat(request: any, clientRawRequest: any = null) {
         await import("@omniroute/open-sse/services/autoCombo/autoPrefix.ts");
       const parsed = parseAutoPrefix(resolvedModelStr);
       if (parsed.valid) {
-        autoVariant = parsed.variant;
+        if (!Object.prototype.hasOwnProperty.call(AUTO_TEMPLATE_VARIANTS, resolvedModelStr)) {
+          autoVariant = parsed.variant;
+        }
         // C3: Apply autoRoutingDefaultVariant from settings when bare "auto" is used
-        if (autoVariant === undefined && settings?.autoRoutingDefaultVariant) {
+        if (
+          resolvedModelStr === "auto" &&
+          autoVariant === undefined &&
+          settings?.autoRoutingDefaultVariant
+        ) {
           autoVariant = settings.autoRoutingDefaultVariant as AutoVariant;
         }
         log.info(
@@ -428,8 +452,15 @@ export async function handleChat(request: any, clientRawRequest: any = null) {
     }
   }
 
-  // Auto-prefix short-circuit: if auto/ prefix was detected, replace combo with virtual one
+  // Auto-prefix short-circuit: if a recognized auto/ prefix was detected, replace combo with virtual one
   if (isAutoRouting && combo === null) {
+    if (!recognizedBuiltInAuto) {
+      return errorResponse(
+        HTTP_STATUS.BAD_REQUEST,
+        `Model '${resolvedModelStr}' is not a valid combo or provider. Unknown built-in auto combo.`
+      );
+    }
+
     try {
       const { createVirtualAutoCombo } =
         await import("@omniroute/open-sse/services/autoCombo/virtualFactory.ts");
@@ -772,7 +803,14 @@ async function handleSingleModelChat(
     });
   }
 
-  const { provider: resolvedProvider, model, sourceFormat, targetFormat, extendedContext, apiFormat } = resolved;
+  const {
+    provider: resolvedProvider,
+    model,
+    sourceFormat,
+    targetFormat,
+    extendedContext,
+    apiFormat,
+  } = resolved;
   // Prefer the combo target's providerId when available — the model string's
   // provider prefix may differ from the credential provider ID (e.g. model
   // "xiaomi/mimo-v2-flash" resolves to provider "xiaomi" but the combo target
@@ -877,6 +915,10 @@ async function handleSingleModelChat(
   let requestRetryLastError = null;
   let requestRetryLastStatus = null;
   let requestRetryLastCooldownMs = 0;
+  // Bug #3758: per-request counter bounding the early-close (STREAM_EARLY_EOF)
+  // re-attempt to exactly one for the whole request. Declared outside both retry
+  // loops so it can never reset and loop.
+  let streamEarlyEofRetries = 0;
 
   requestAttemptLoop: while (true) {
     const excludedConnectionIds = new Set<string>();
@@ -1097,6 +1139,27 @@ async function handleSingleModelChat(
         (result.errorType === "stream_timeout" || result.errorType === "stream_early_eof") &&
         !isAntigravityStreamReadinessFailure
       ) {
+        // Bug #3758: flaky OpenAI-compatible upstreams (e.g. NVIDIA NIM) sometimes
+        // send HTTP 200 then close the SSE early with zero useful frames
+        // (STREAM_EARLY_EOF). That is a transient upstream glitch, not a bad key — so
+        // allow exactly ONE bounded same-connection re-attempt before surfacing the
+        // 502. Do NOT retry STREAM_READINESS_TIMEOUT (a slow-but-alive upstream;
+        // retrying would only double latency) and do NOT mark the account unavailable
+        // for the early close.
+        if (
+          shouldRetryStreamEarlyEof(result.errorCode, streamEarlyEofRetries) &&
+          !hasForcedConnection
+        ) {
+          streamEarlyEofRetries += 1;
+          log.warn(
+            "STREAM",
+            `${provider}/${model} closed the stream early before useful content — retrying once (attempt ${streamEarlyEofRetries})`
+          );
+          // Plain re-attempt of the same request: no markAccountUnavailable, no
+          // excludedConnectionIds mutation (an early close is not a bad connection).
+          continue;
+        }
+
         // Stream readiness timeout is an upstream stall after an HTTP response was received,
         // not an account/quota failure. Do NOT mark the account unavailable here.
         return result.response;
@@ -1357,8 +1420,11 @@ async function handleSingleModelChat(
             model,
             providerProfile,
             {
-              persistUnavailableState:
-                !(isCombo && result.status === 429 && (failureKind === "rate_limit" || failureKind === "transient")),
+              persistUnavailableState: !(
+                isCombo &&
+                result.status === 429 &&
+                (failureKind === "rate_limit" || failureKind === "transient")
+              ),
               isCombo,
             }
           );

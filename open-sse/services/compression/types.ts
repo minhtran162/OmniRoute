@@ -20,7 +20,16 @@ export type CompressionMode =
 export type CavemanIntensity = "lite" | "full" | "ultra";
 export type RtkIntensity = "minimal" | "standard" | "aggressive";
 export type RtkRawOutputRetention = "never" | "failures" | "always";
-export type CompressionEngineId = "lite" | "caveman" | "aggressive" | "ultra" | "rtk";
+export type CompressionEngineId =
+  | "lite"
+  | "caveman"
+  | "aggressive"
+  | "ultra"
+  | "rtk"
+  | "session-dedup"
+  | "headroom"
+  | "ccr"
+  | "llmlingua";
 
 export interface CavemanRule {
   name: string;
@@ -66,6 +75,10 @@ export interface RtkConfig {
   trustProjectFilters: boolean;
   rawOutputRetention: RtkRawOutputRetention;
   rawOutputMaxBytes: number;
+  /** R5: enable grouping of near-equivalent consecutive lines. Default: false. */
+  enableGrouping?: boolean;
+  /** R5: minimum consecutive similar-line run to trigger grouping. Default: 3. */
+  groupingThreshold?: number;
 }
 
 export interface CompressionLanguageConfig {
@@ -73,6 +86,16 @@ export interface CompressionLanguageConfig {
   defaultLanguage: string;
   autoDetect: boolean;
   enabledPacks: string[];
+}
+
+/**
+ * Provider-delegated compression (Anthropic "Context Editing", beta
+ * `context-management-2025-06-27`). Claude/Anthropic only — the provider clears
+ * old tool-use blocks server-side. This config only carries the on/off flag; the
+ * request-time header/body injection is a separate slice.
+ */
+export interface ContextEditingConfig {
+  enabled: boolean;
 }
 
 export interface CompressionPipelineStep {
@@ -98,6 +121,8 @@ export interface CompressionConfig {
   languageConfig?: CompressionLanguageConfig;
   aggressive?: AggressiveConfig;
   ultra?: UltraConfig;
+  /** Provider-delegated context editing (Claude/Anthropic only). */
+  contextEditing?: ContextEditingConfig;
 }
 
 export interface CompressionStats {
@@ -212,6 +237,10 @@ export const DEFAULT_COMPRESSION_LANGUAGE_CONFIG: CompressionLanguageConfig = {
   defaultLanguage: "en",
   autoDetect: true,
   enabledPacks: ["en"],
+};
+
+export const DEFAULT_CONTEXT_EDITING_CONFIG: ContextEditingConfig = {
+  enabled: false,
 };
 
 /** Aging thresholds for progressive message degradation (Phase 3) */

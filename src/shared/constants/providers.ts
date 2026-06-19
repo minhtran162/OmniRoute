@@ -317,7 +317,7 @@ export const OAUTH_PROVIDERS = {
     subscriptionRisk: true,
     riskNoticeVariant: "oauth",
     authHint:
-      "Sign in at windsurf.com to get your token. Visit windsurf.com/show-auth-token after logging in and paste it here, or use the device-code login flow.",
+      'In the Windsurf / VS Code IDE, open the command palette and run `Windsurf: Provide Auth Token` (or click the Jupyter "Get Windsurf Authentication Token" button), then copy the shown token and paste it here. Note: opening windsurf.com/show-auth-token directly only renders a "Redirecting" page — the IDE must initiate the flow (it adds a `?state=...` param) for the token to appear.',
     website: "https://windsurf.com",
   },
   "devin-cli": {
@@ -661,6 +661,18 @@ export const APIKEY_PROVIDERS = {
     website: "https://openrouter.ai",
     hasFree: true,
     freeNote: "Free models at $0/token with :free suffix - 20 RPM / 200 RPD",
+  },
+  orcarouter: {
+    id: "orcarouter",
+    alias: "orcarouter",
+    name: "OrcaRouter",
+    icon: "router",
+    color: "#0891B2",
+    textIcon: "ORC",
+    passthroughModels: true,
+    website: "https://www.orcarouter.ai",
+    apiHint:
+      "Create an API key (starts with sk-orca-) at https://www.orcarouter.ai, then paste it as a Bearer token. OpenAI-compatible endpoint at https://api.orcarouter.ai/v1.",
   },
   "api-airforce": {
     id: "api-airforce",
@@ -1185,6 +1197,16 @@ export const APIKEY_PROVIDERS = {
     textIcon: "ZA",
     website: "https://open.bigmodel.cn",
     apiHint: "API key from https://open.bigmodel.cn/usercenter/apikeys",
+  },
+  wafer: {
+    id: "wafer",
+    alias: "wafer",
+    name: "Wafer AI",
+    icon: "layers",
+    color: "#6366F1",
+    textIcon: "WF",
+    website: "https://wafer.ai",
+    apiHint: "API key from https://wafer.ai",
   },
   "opencode-zen": {
     id: "opencode-zen",
