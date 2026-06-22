@@ -320,12 +320,6 @@ const VISION_MODEL_ID_FRAGMENTS = [
   "multimodal",
 ];
 
-function modelIdLikelyVision(modelId: string | null | undefined): boolean {
-  if (!modelId) return false;
-  const normalized = modelId.toLowerCase();
-  return VISION_MODEL_ID_FRAGMENTS.some((fragment) => normalized.includes(fragment));
-}
-
 function resolveVisionCapability(
   spec: ModelSpec | undefined,
   registryModel: { supportsVision?: boolean } | null,

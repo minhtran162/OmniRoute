@@ -56,6 +56,8 @@ ENV OMNIROUTE_USE_TURBOPACK=0
 # Override for hosts with more/less RAM: `--build-arg OMNIROUTE_BUILD_MEMORY_MB=6144`.
 ARG OMNIROUTE_BUILD_MEMORY_MB=4096
 ENV NODE_OPTIONS="--max-old-space-size=${OMNIROUTE_BUILD_MEMORY_MB}"
+ARG NEXT_BUILD_CPUS=2
+ENV NEXT_BUILD_CPUS=${NEXT_BUILD_CPUS}
 
 COPY . ./
 RUN --mount=type=cache,target=/app/.build/next/cache \

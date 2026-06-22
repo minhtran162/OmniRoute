@@ -1,3 +1,7 @@
+---
+title: OmniRoute Documentation Overhaul Plan
+---
+
 # OmniRoute Documentation Overhaul Plan
 
 > Goal: Make all docs accessible to non-tech users while preserving technical depth for developers.
