@@ -12,7 +12,7 @@ import { compressAggressive } from "./aggressive.ts";
 import { ultraCompress } from "./ultra.ts";
 import { createCompressionStats } from "./stats.ts";
 import { registerBuiltinCompressionEngines } from "./engines/index.ts";
-import { getCompressionEngine } from "./engines/registry.ts";
+import { getCompressionEngine, getEngineEntry } from "./engines/registry.ts";
 import { applyRtkCompression } from "./engines/rtk/index.ts";
 import { adaptBodyForCompression } from "./bodyAdapter.ts";
 import {
@@ -20,6 +20,8 @@ import {
   getCacheAwareStrategy,
   type CachingDetectionContext,
 } from "./cachingAware.ts";
+import { resolveCompressionPlan } from "./resolveCompressionPlan.ts";
+import { deriveDefaultPlan, type DerivedPlan } from "./deriveDefaultPlan.ts";
 
 export function checkComboOverride(
   config: CompressionConfig,
@@ -33,19 +35,122 @@ export function shouldAutoTrigger(config: CompressionConfig, estimatedTokens: nu
   return config.autoTriggerTokens > 0 && estimatedTokens >= config.autoTriggerTokens;
 }
 
+/**
+ * Resolves the effective compression plan (mode + derived stacked pipeline) WITHOUT
+ * the caching-aware mode adjustment (that is layered on by {@link selectCompressionPlan}).
+ *
+ * Precedence — preserved from the historical {@link getEffectiveMode} ordering:
+ *   1. master off                     → off
+ *   2. routing-combo override (comboId)→ that mode (resolver honors it via ctx.comboId)
+ *   3. auto-trigger (large prompt)     → autoTriggerMode, BEFORE the plain derived default
+ *   4. derived default                 → resolveCompressionPlan (engines map → mode/pipeline)
+ *
+ * Step 3 mirrors today's behaviour: auto-trigger takes precedence over the plain
+ * derived default but never over an explicit routing-combo override.
+ *
+ * `combos` is `{}` in Phase 1 — the active named-combo selection UI is Phase 2, and the
+ * resolver falls through to the derived default when no combo is supplied. chatCore still
+ * resolves named/default combos via its own DB path (mutating config.stackedPipeline).
+ */
+function resolveBasePlan(
+  config: CompressionConfig,
+  comboId: string | null,
+  estimatedTokens: number
+): DerivedPlan {
+  if (!config.enabled) return { mode: "off", stackedPipeline: [] };
+
+  const comboMode = checkComboOverride(config, comboId);
+  if (comboMode) {
+    // A routing-combo "stacked" override still wants the configured stacked pipeline,
+    // so route it through the resolver (which reads config.stackedPipeline for stacked).
+    return resolveCompressionPlan(config, { comboId, combos: {} });
+  }
+
+  if (shouldAutoTrigger(config, estimatedTokens)) {
+    const mode = config.autoTriggerMode ?? "lite";
+    return mode === "stacked"
+      ? { mode, stackedPipeline: config.stackedPipeline ?? [] }
+      : { mode, stackedPipeline: [] };
+  }
+
+  return deriveDefaultPlanFromConfig(config, comboId);
+}
+
+/**
+ * Derived-default step. The per-engine toggle map drives the default ONLY when it was
+ * EXPLICITLY configured via the panel (a stored `engines` row — `config.enginesExplicit`).
+ * For legacy installs the map is backfilled for DISPLAY only (so the panel shows current
+ * state); dispatch falls back to the historical `config.defaultMode` so behaviour is
+ * byte-for-byte preserved until the operator opts into the panel by saving. This avoids a
+ * silent behaviour change for installs whose backfilled engine flags don't exactly match
+ * their old defaultMode.
+ */
+function deriveDefaultPlanFromConfig(
+  config: CompressionConfig,
+  comboId: string | null
+): DerivedPlan {
+  if (config.enginesExplicit) {
+    // Panel-configured: the engines map (via the resolver, which stays header/active-combo
+    // aware for Phases 2-3) is authoritative — including an explicit "everything off".
+    return resolveCompressionPlan(config, { comboId, combos: {} });
+  }
+
+  // Legacy path: defaultMode carries the effective mode (the engines map is display-only here).
+  const legacyMode = config.defaultMode;
+  if (legacyMode && legacyMode !== "off") {
+    return legacyMode === "stacked"
+      ? { mode: legacyMode, stackedPipeline: config.stackedPipeline ?? [] }
+      : { mode: legacyMode, stackedPipeline: [] };
+  }
+
+  return { mode: "off", stackedPipeline: [] };
+}
+
+/**
+ * True when the EXPLICITLY-configured engines map (panel-saved) derives a multi-engine
+ * stacked pipeline. chatCore uses this to know the panel's derived pipeline is authoritative
+ * and the legacy default-combo fallback must NOT override it. Returns false for legacy
+ * (non-explicit) installs so their historical default-combo path is preserved untouched.
+ */
+export function enginesMapDerivesStackedPipeline(config: CompressionConfig): boolean {
+  if (!config.enginesExplicit) return false;
+  const plan = deriveDefaultPlan(config.engines ?? {}, config.enabled !== false);
+  return plan.mode === "stacked" && plan.stackedPipeline.length > 0;
+}
+
 export function getEffectiveMode(
   config: CompressionConfig,
   comboId: string | null,
   estimatedTokens: number
 ): CompressionMode {
-  if (!config.enabled) return "off";
+  return resolveBasePlan(config, comboId, estimatedTokens).mode as CompressionMode;
+}
 
-  const comboMode = checkComboOverride(config, comboId);
-  if (comboMode) return comboMode;
+/**
+ * Like {@link selectCompressionStrategy} but returns the full derived plan
+ * (effective `mode` + `stackedPipeline`). When the resolver derives a `stacked`
+ * plan from the per-engine toggle map, the pipeline is exposed here so the caller
+ * can feed it to {@link applyCompressionAsync} (which reads config.stackedPipeline).
+ * The caching-aware mode adjustment is applied to `mode` exactly as in
+ * {@link selectCompressionStrategy}.
+ */
+export function selectCompressionPlan(
+  config: CompressionConfig,
+  comboId: string | null,
+  estimatedTokens: number,
+  body?: Record<string, unknown>,
+  context?: CachingDetectionContext
+): DerivedPlan {
+  const plan = resolveBasePlan(config, comboId, estimatedTokens);
 
-  if (shouldAutoTrigger(config, estimatedTokens)) return config.autoTriggerMode ?? "lite";
+  // Apply caching-aware adjustments to the mode if body is provided
+  if (body) {
+    const ctx = detectCachingContext(body, context);
+    const cacheAware = getCacheAwareStrategy(plan.mode as CompressionMode, ctx);
+    return { ...plan, mode: cacheAware.strategy as CompressionMode };
+  }
 
-  return config.defaultMode;
+  return plan;
 }
 
 export function selectCompressionStrategy(
@@ -55,16 +160,7 @@ export function selectCompressionStrategy(
   body?: Record<string, unknown>,
   context?: CachingDetectionContext
 ): CompressionMode {
-  const selectedMode = getEffectiveMode(config, comboId, estimatedTokens);
-
-  // Apply caching-aware adjustments if body is provided
-  if (body) {
-    const ctx = detectCachingContext(body, context);
-    const cacheAware = getCacheAwareStrategy(selectedMode, ctx);
-    return cacheAware.strategy as CompressionMode;
-  }
-
-  return selectedMode;
+  return selectCompressionPlan(config, comboId, estimatedTokens, body, context).mode as CompressionMode;
 }
 
 /**
@@ -82,6 +178,10 @@ export function resolveCacheAwareConfig(
 ): CompressionConfig {
   if (!body) return config;
   const ctx = detectCachingContext(body, context);
+  // Only `skipSystemPrompt` is consumed here, and it depends solely on `ctx.isCachingProvider`
+  // (NOT on the strategy arg — see getCacheAwareStrategy), so the stored `defaultMode` is a safe
+  // input even though it may be "off" for a panel-configured install. If getCacheAwareStrategy is
+  // ever extended to key `skipSystemPrompt` on the mode, pass the resolved effective mode instead.
   const cacheAware = getCacheAwareStrategy(config.defaultMode, ctx);
   if (cacheAware.skipSystemPrompt && config.preserveSystemPrompt === false) {
     return { ...config, preserveSystemPrompt: true };
@@ -97,6 +197,12 @@ export function applyCompression(
     supportsVision?: boolean | null;
     config?: CompressionConfig;
     principalId?: string;
+    /**
+     * Opt into the TV1 stacked bail-out (skip-on-throw + min-gain). Default off keeps the
+     * legacy behavior. The combo proactive-fallback path enables it so a throwing engine is
+     * skipped instead of silently dropping the target. Flows through to applyStackedCompression.
+     */
+    bailout?: BailoutConfig;
   }
 ): CompressionResult {
   if (mode === "off") {
@@ -104,7 +210,9 @@ export function applyCompression(
   }
   if (mode === "rtk") {
     return applyRtkCompression(body, {
-      config: options?.config?.rtkConfig,
+      // Selecting the "rtk" mode IS the enable signal — run it even if the per-engine
+      // rtkConfig.enabled flag is off (that flag gates stacked steps). (B-MODE-ENGINE-DECOUPLE)
+      config: { ...(options?.config?.rtkConfig ?? {}), enabled: true },
     });
   }
   const adapter = adaptBodyForCompression(body);
@@ -141,6 +249,9 @@ export function applyCompression(
             ),
           }
         : {}),
+      // Selecting the "standard" mode runs caveman regardless of the per-engine
+      // cavemanConfig.enabled flag (that flag gates stacked steps). (B-MODE-ENGINE-DECOUPLE)
+      enabled: true,
     };
     const result = cavemanCompress(
       compressionBody as Parameters<typeof cavemanCompress>[0],
@@ -222,6 +333,7 @@ export async function applyCompressionAsync(
     supportsVision?: boolean | null;
     config?: CompressionConfig;
     principalId?: string;
+    onEngineStep?: (step: StackedCompressionStep) => void;
   }
 ): Promise<CompressionResult> {
   if (mode === "stacked") {
@@ -233,7 +345,80 @@ export async function applyCompressionAsync(
     );
     return adapter.adapted ? { ...result, body: adapter.restore(result.body) } : result;
   }
+  // Ultra's optional SLM (model) tier is async — route it here when a model is configured.
+  if (mode === "ultra") {
+    return applyUltraAsync(body, options);
+  }
   return applyCompression(body, mode, options);
+}
+
+/**
+ * Ultra mode with the optional local SLM (model) tier.
+ *
+ * When `config.ultra.modelPath` is set, the prose is routed through the llmlingua engine
+ * (the real local-model compressor). The llmlingua backend fail-opens when the model is
+ * absent (e.g. the ONNX model is not provisioned), so this degrades gracefully:
+ *  - model present and it compresses  → return the SLM result (tagged "ultra-slm");
+ *  - model absent / no gain / failure → fall back to `aggressive` when
+ *    `slmFallbackToAggressive` is set, otherwise the heuristic ultra (`pruneByScore`).
+ *
+ * Without `modelPath` the behavior is byte-identical to the synchronous heuristic ultra.
+ */
+async function applyUltraAsync(
+  body: Record<string, unknown>,
+  options?: {
+    model?: string;
+    supportsVision?: boolean | null;
+    config?: CompressionConfig;
+    principalId?: string;
+    onEngineStep?: (step: StackedCompressionStep) => void;
+  }
+): Promise<CompressionResult> {
+  const ultraConfig = options?.config?.ultra;
+  const modelPath = typeof ultraConfig?.modelPath === "string" ? ultraConfig.modelPath.trim() : "";
+
+  // No model configured → heuristic ultra (unchanged default).
+  if (!modelPath) {
+    return applyCompression(body, "ultra", options);
+  }
+
+  registerBuiltinCompressionEngines();
+  const slmEngine = getCompressionEngine("llmlingua");
+  if (slmEngine?.applyAsync) {
+    const engineOptions: CompressionEngineApplyOptions = {
+      model: options?.model,
+      supportsVision: options?.supportsVision,
+      config: options?.config,
+      principalId: options?.principalId,
+      stepConfig: {
+        modelPath,
+        ...(typeof ultraConfig?.compressionRate === "number"
+          ? { compressionRate: ultraConfig.compressionRate }
+          : {}),
+      },
+    };
+    try {
+      const slm = await slmEngine.applyAsync(body, engineOptions);
+      if (slm.compressed && slm.stats) {
+        // Attribute the result to ultra (the selected mode) while marking the SLM tier.
+        return {
+          ...slm,
+          stats: {
+            ...slm.stats,
+            mode: "ultra",
+            techniquesUsed: Array.from(
+              new Set([...(slm.stats.techniquesUsed ?? []), "ultra-slm"])
+            ),
+          },
+        };
+      }
+    } catch {
+      // llmlingua fail-opens internally, but guard anyway and use the configured fallback.
+    }
+  }
+
+  // SLM tier unavailable or produced no gain → fall back per slmFallbackToAggressive.
+  return applyCompression(body, ultraConfig?.slmFallbackToAggressive ? "aggressive" : "ultra", options);
 }
 
 function normalizePipelineStep(step: CompressionPipelineStep | string): CompressionPipelineStep {
@@ -256,6 +441,18 @@ interface BailoutConfig {
   minGainPercent?: number;
 }
 
+/** Per-engine progress emitted mid-pipeline by the stacked loops (F3.3 live streaming). */
+export interface StackedCompressionStep {
+  stepIndex: number;
+  totalSteps: number;
+  engine: string;
+  state: "done" | "skipped";
+  originalTokens: number;
+  compressedTokens: number;
+  savingsPercent: number;
+  durationMs?: number;
+}
+
 interface StackOptions {
   model?: string;
   supportsVision?: boolean | null;
@@ -265,6 +462,30 @@ interface StackOptions {
   bailout?: BailoutConfig;
   /** Authenticated principal id — threaded through to CCR engine for store scoping. */
   principalId?: string;
+  /** F3.3: called once per engine as it completes (live per-engine streaming). */
+  onEngineStep?: (step: StackedCompressionStep) => void;
+}
+
+/** Emit a per-engine step to the live streaming callback (best-effort, no-op when unset). */
+function reportEngineStep(
+  onStep: ((step: StackedCompressionStep) => void) | undefined,
+  stepIndex: number,
+  totalSteps: number,
+  engine: string,
+  result: CompressionResult
+): void {
+  if (!onStep) return;
+  const s = result.stats;
+  onStep({
+    stepIndex,
+    totalSteps,
+    engine,
+    state: result.compressed ? "done" : "skipped",
+    originalTokens: s?.originalTokens ?? 0,
+    compressedTokens: s?.compressedTokens ?? s?.originalTokens ?? 0,
+    savingsPercent: s?.savingsPercent ?? 0,
+    ...(s?.durationMs !== undefined ? { durationMs: s.durationMs } : {}),
+  });
 }
 
 /** Accumulates per-step telemetry across a stacked run (shared sync/async). */
@@ -406,10 +627,16 @@ export function applyStackedCompression(
   const start = performance.now();
 
   const bailout = options?.bailout;
+  const onStep = options?.onEngineStep;
+  const totalSteps = steps.length;
+  let stepIdx = 0;
 
   for (const step of steps) {
     const engine = getCompressionEngine(step.engine);
     if (!engine) continue;
+    // Respect the registry enabled flag: a step naming a disabled engine is skipped, so an
+    // operator can turn an engine off (setEngineEnabled) without editing every pipeline.
+    if (getEngineEntry(step.engine)?.enabled === false) continue;
 
     // TV1: when bail-out is ENABLED, wrap apply() and apply skip rules.
     // When DISABLED (default), the code path below is identical to pre-TV1.
@@ -438,6 +665,7 @@ export function applyStackedCompression(
         currentBody = result.body;
         compressed = true;
       }
+      reportEngineStep(onStep, stepIdx++, totalSteps, step.engine, result);
     }
   }
 
@@ -471,10 +699,15 @@ export async function applyStackedCompressionAsync(
   const start = performance.now();
 
   const bailout = options?.bailout;
+  const onStep = options?.onEngineStep;
+  const totalSteps = steps.length;
+  let stepIdx = 0;
 
   for (const step of steps) {
     const engine = getCompressionEngine(step.engine);
     if (!engine) continue;
+    // Respect the registry enabled flag (same as the sync loop) — keep both in lockstep.
+    if (getEngineEntry(step.engine)?.enabled === false) continue;
     const stepOptions = buildStepOptions(step, options);
 
     // TV1: same bail-out discipline as the sync loop (opt-in, default off).
@@ -507,6 +740,7 @@ export async function applyStackedCompressionAsync(
         currentBody = result.body;
         compressed = true;
       }
+      reportEngineStep(onStep, stepIdx++, totalSteps, step.engine, result);
     }
   }
 

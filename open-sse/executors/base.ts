@@ -246,6 +246,18 @@ function hasActiveClaudeThinking(body: Record<string, unknown>): boolean {
  * xhigh by default and falls back to high only for explicit xhigh opt-outs.
  */
 const MISTRAL_NO_REASONING_EFFORT_PATTERN = /devstral/i;
+// GitHub Copilot Claude routing is granular (upstream port: decolua/9router#791):
+//   ✅ Pass through — Claude Opus 4.6, Claude Sonnet 4.6. Copilot routes both to
+//      Anthropic's chat/completions surface, which honors reasoning_effort and
+//      emits visible reasoning tokens (verified upstream: 3× token increase
+//      between low/medium/high).
+//   ❌ Strip — Claude Haiku 4.5 and Claude Opus 4.7 (rejected upstream by
+//      Copilot's Claude backend), older Claude variants, all `haiku`-named
+//      models, and the `oswe-*` family (Raptor) which still rejects
+//      reasoning_effort.
+// Order matters: the opt-in check must run BEFORE the broad Claude/haiku/oswe strip.
+const GITHUB_REASONING_EFFORT_OPT_IN_PATTERN =
+  /claude[-_.]?(?:opus|sonnet)[-_.]?4[-_.]6/i;
 const GITHUB_NO_REASONING_EFFORT_PATTERN = /(claude|haiku|oswe)/i;
 
 function supportsMaxEffortForProvider(provider: string, model: string): boolean {
@@ -273,9 +285,11 @@ export function sanitizeReasoningEffortForProvider(
   const effortStr = typeof effort === "string" ? effort.toLowerCase() : "";
   const modelStr = model || "";
 
+  const githubOptIn =
+    provider === "github" && GITHUB_REASONING_EFFORT_OPT_IN_PATTERN.test(modelStr);
   const rejecting =
     (provider === "mistral" && MISTRAL_NO_REASONING_EFFORT_PATTERN.test(modelStr)) ||
-    (provider === "github" && GITHUB_NO_REASONING_EFFORT_PATTERN.test(modelStr));
+    (provider === "github" && !githubOptIn && GITHUB_NO_REASONING_EFFORT_PATTERN.test(modelStr));
   if (rejecting) {
     log?.info?.(
       "REASONING_SANITIZE",
@@ -290,6 +304,30 @@ export function sanitizeReasoningEffortForProvider(
       else next.reasoning = r;
     }
     return next;
+  }
+
+  // Native DeepSeek (api.deepseek.com) — V4 thinking mode accepts reasoning_effort
+  // ONLY as {high, max} (its own top tier is literally "max"). OmniRoute's internal
+  // scale is low|medium|high|xhigh where xhigh is the top, so map onto DeepSeek's
+  // vocabulary: xhigh → max (top→top), low|medium → high (below the enum floor).
+  // high/max pass through unchanged. Without this, the claude→openai translator's
+  // xhigh (and max-normalized-to-xhigh below) reaches DeepSeek as an unknown value,
+  // silently dropping the client's requested effort. This is the INVERSE of the
+  // OpenRouter-DeepSeek path, whose normalized API expects xhigh, not max (pi#4055).
+  if (provider === "deepseek") {
+    const mapped =
+      effortStr === "xhigh" ? "max" : effortStr === "low" || effortStr === "medium" ? "high" : null;
+    if (mapped && mapped !== effortStr) {
+      log?.info?.(
+        "REASONING_SANITIZE",
+        `deepseek/${modelStr}: normalized reasoning_effort ${effortStr} → ${mapped}`
+      );
+      const next: Record<string, unknown> = { ...b };
+      if (hasTopLevelReasoningEffort) next.reasoning_effort = mapped;
+      if (reasoning) next.reasoning = { ...reasoning, effort: mapped };
+      return next;
+    }
+    return body;
   }
 
   const supportsXHigh = supportsXHighEffort(provider, modelStr);
@@ -806,26 +844,36 @@ export class BaseExecutor {
       }
 
       try {
-        // Only enforce the timeout while waiting for the initial fetch() response.
-        // Once headers arrive, active streams must not be cut off by total elapsed time;
-        // post-start stalls are handled separately by STREAM_IDLE_TIMEOUT_MS / bodyTimeout.
+        // Timeout only covers response start; stream stalls are handled downstream.
         const fetchStartTimeoutMs = this.getTimeoutMs();
-        const timeoutController = fetchStartTimeoutMs > 0 ? new AbortController() : null;
-        let timeoutId: ReturnType<typeof setTimeout> | null = null;
-        if (timeoutController) {
-          timeoutId = setTimeout(() => {
-            const timeoutError = new Error(
-              `Fetch timeout after ${fetchStartTimeoutMs}ms on ${url}`
-            );
-            timeoutError.name = "TimeoutError";
-            timeoutController.abort(timeoutError);
-          }, fetchStartTimeoutMs);
-        }
-        const timeoutSignal = timeoutController?.signal ?? null;
-        const combinedSignal =
-          signal && timeoutSignal
-            ? mergeAbortSignals(signal, timeoutSignal)
-            : signal || timeoutSignal;
+        const fetchWithStartTimeout = async (requestUrl: string, requestOptions: RequestInit) => {
+          const timeoutController = fetchStartTimeoutMs > 0 ? new AbortController() : null;
+          let timeoutId: ReturnType<typeof setTimeout> | null = null;
+          if (timeoutController) {
+            timeoutId = setTimeout(() => {
+              const timeoutError = new Error(
+                `Fetch timeout after ${fetchStartTimeoutMs}ms on ${requestUrl}`
+              );
+              timeoutError.name = "TimeoutError";
+              timeoutController.abort(timeoutError);
+            }, fetchStartTimeoutMs);
+          }
+
+          const timeoutSignal = timeoutController?.signal ?? null;
+          const combinedSignal =
+            signal && timeoutSignal
+              ? mergeAbortSignals(signal, timeoutSignal)
+              : signal || timeoutSignal;
+          const optionsWithSignal = combinedSignal
+            ? { ...requestOptions, signal: combinedSignal }
+            : requestOptions;
+
+          try {
+            return await fetch(requestUrl, optionsWithSignal);
+          } finally {
+            if (timeoutId) clearTimeout(timeoutId);
+          }
+        };
 
         const isClaudeCodeClient =
           clientHeaders?.["x-app"] === "cli" ||
@@ -918,7 +966,19 @@ export class BaseExecutor {
             }
           }
 
-          if (headerThinking === "adaptive") {
+          // Anthropic rejects `thinking` (enabled/adaptive) when tool_choice forces a
+          // specific tool ({type:"any"|"tool"}): "Thinking may not be enabled when
+          // tool_choice forces tool use". Treat forced tool_choice as an implicit
+          // `thinking: off` so neither the explicit-adaptive branch nor the default CC
+          // injection below produces the invalid combination (incl. client-sent thinking).
+          const toolChoiceForced =
+            tb.tool_choice === "any" ||
+            (typeof tb.tool_choice === "object" &&
+              tb.tool_choice !== null &&
+              ((tb.tool_choice as Record<string, unknown>).type === "any" ||
+                (tb.tool_choice as Record<string, unknown>).type === "tool"));
+          const effThinking = toolChoiceForced ? "off" : headerThinking;
+          if (effThinking === "adaptive") {
             if (tb.thinking === undefined) {
               tb.thinking = { type: "adaptive" };
               appliedThinking = "adaptive";
@@ -928,11 +988,11 @@ export class BaseExecutor {
                 edits: [{ type: "clear_thinking_20251015", keep: "all" }],
               };
             }
-          } else if (headerThinking === "off") {
+          } else if (effThinking === "off") {
             delete tb.thinking;
             delete tb.context_management;
             appliedThinking = "off";
-          } else if (!headerThinking && !headerEffort) {
+          } else if (!effThinking && !headerEffort) {
             // Default CC logic when no override headers are present
             const isHaiku = typeof tb.model === "string" && tb.model.includes("haiku");
             if (isHaiku) {
@@ -1204,20 +1264,98 @@ export class BaseExecutor {
 
         mergeUpstreamExtraHeaders(finalHeaders, upstreamExtraHeaders);
         const serializedBody = prl.parseBody(bodyString);
+        // #4307 — Preserve the non-enumerable tool-name cloak/remap reverse map
+        // (`_toolNameMap`, set on the live `transformedBody` by
+        // remapToolNamesInRequest / cloakThirdPartyToolNames) that the JSON
+        // round-trip above drops. chatCore's response-side un-cloak reads it off
+        // `result.transformedBody` to restore the client's original tool-name
+        // casing (e.g. `read`, not the cloaked `Read`). Without this re-attach the
+        // map is lost and the client receives the cloaked casing — a regression
+        // from #3941's serialized-body capture. Mirrors antigravity.ts's
+        // `attachToolNameMap`; non-enumerable so it never re-serializes upstream.
+        if (
+          transformedBody &&
+          typeof transformedBody === "object" &&
+          serializedBody &&
+          typeof serializedBody === "object"
+        ) {
+          const liveToolNameMap = (transformedBody as Record<string, unknown>)._toolNameMap;
+          if (
+            liveToolNameMap instanceof Map &&
+            liveToolNameMap.size > 0 &&
+            !((serializedBody as Record<string, unknown>)._toolNameMap instanceof Map)
+          ) {
+            Object.defineProperty(serializedBody, "_toolNameMap", {
+              value: liveToolNameMap,
+              enumerable: false,
+              configurable: true,
+              writable: true,
+            });
+          }
+        }
         const fetchOptions: RequestInit = {
           method: "POST",
           headers: finalHeaders,
           body: bodyString,
         };
-        if (combinedSignal) fetchOptions.signal = combinedSignal;
 
-        let response;
-        try {
-          response = await fetch(url, fetchOptions);
-        } finally {
-          if (timeoutId) {
-            clearTimeout(timeoutId);
-            timeoutId = null;
+        let response = await fetchWithStartTimeout(url, fetchOptions);
+
+        // Context Editing 400-fallback for Claude-compatible relays.
+        if (
+          response.status === HTTP_STATUS.BAD_REQUEST &&
+          contextEditing?.enabled &&
+          !contextEditingDisabled &&
+          transformedBody &&
+          typeof transformedBody === "object" &&
+          (transformedBody as Record<string, unknown>).context_management !== undefined
+        ) {
+          const errText = await response
+            .clone()
+            .text()
+            .catch(() => "");
+          if (/context[_-]management|context editing/i.test(errText)) {
+            contextEditingDisabled = true;
+            delete (transformedBody as Record<string, unknown>).context_management;
+            let retryBody = JSON.stringify(transformedBody);
+            if (isClaudeCodeCompatible(this.provider) || this.provider === "claude") {
+              retryBody = await signRequestBody(retryBody);
+            }
+            log?.debug?.(
+              "CONTEXT_EDITING",
+              `Upstream 400 rejected context_management on ${url} — retrying without it`
+            );
+            response = await fetchWithStartTimeout(url, { ...fetchOptions, body: retryBody });
+          }
+        }
+
+        // Generic reactive 400 field-downgrade; each field is stripped at most once.
+        if (
+          response.status === HTTP_STATUS.BAD_REQUEST &&
+          transformedBody &&
+          typeof transformedBody === "object"
+        ) {
+          const errText = await response
+            .clone()
+            .text()
+            .catch(() => "");
+          const offending = findOffendingField(errText);
+          if (
+            offending &&
+            !strippedFields.has(offending) &&
+            (transformedBody as Record<string, unknown>)[offending] !== undefined
+          ) {
+            strippedFields.add(offending);
+            delete (transformedBody as Record<string, unknown>)[offending];
+            let retryBody = JSON.stringify(transformedBody);
+            if (isClaudeCodeCompatible(this.provider) || this.provider === "claude") {
+              retryBody = await signRequestBody(retryBody);
+            }
+            log?.debug?.(
+              "FIELD_400",
+              `Upstream 400 rejected ${offending} on ${url} — retrying without it`
+            );
+            response = await fetchWithStartTimeout(url, { ...fetchOptions, body: retryBody });
           }
         }
 

@@ -29,6 +29,7 @@ import {
 } from "../../src/shared/utils/classify429";
 import { resolveProviderId } from "../../src/shared/constants/providers";
 import { resolveUseUpstream429BreakerHints } from "../../src/shared/utils/providerHints";
+import { getCodexModelScope } from "../config/codexQuotaScopes.ts";
 import { isRpdExhausted, isRpmExhausted } from "./geminiRateLimitTracker.ts";
 
 export type ProviderProfile = {
@@ -365,7 +366,9 @@ function getCanonicalLockProvider(provider: string): string {
 }
 
 function getModelLockKey(provider: string, connectionId: string, model: string) {
-  return `${getCanonicalLockProvider(provider)}:${connectionId}:${model}`;
+  const canonicalProvider = getCanonicalLockProvider(provider);
+  const lockModel = canonicalProvider === "codex" ? getCodexModelScope(model) : model;
+  return `${canonicalProvider}:${connectionId}:${lockModel}`;
 }
 
 function getFailureWindowMs(profile: ProviderProfile | null = null, fallbackMs = 30 * 60 * 1000) {
@@ -476,6 +479,27 @@ export function lockModel(
   });
 }
 
+/**
+ * Pick the `exactCooldownMs` to apply to a model lockout (#1308).
+ *
+ * When the upstream response carried an explicit reset longer than the base
+ * cooldown — e.g. Antigravity "Resets in 160h", a `Retry-After` header, or a
+ * parseable reset text already extracted by `checkFallbackError`/`parseRetryFromErrorText`
+ * into `parsedCooldownMs` — honor it exactly so an exhausted model is not retried
+ * again within minutes. Otherwise preserve the previous behavior: return `0` to let
+ * `recordModelLockoutFailure` apply its exponential backoff, or the base cooldown when
+ * backoff is disabled.
+ */
+export function selectLockoutCooldownMs(
+  parsedCooldownMs: number,
+  settings: { baseCooldownMs: number; useExponentialBackoff: boolean }
+): number {
+  if (typeof parsedCooldownMs === "number" && parsedCooldownMs > settings.baseCooldownMs) {
+    return parsedCooldownMs;
+  }
+  return settings.useExponentialBackoff ? 0 : settings.baseCooldownMs;
+}
+
 export function recordModelLockoutFailure(
   provider: string,
   connectionId: string,
@@ -578,6 +602,7 @@ export function hasPerModelQuota(
     return connectionPassthroughModels;
   }
   if (!provider) return false;
+  if (getCanonicalLockProvider(provider) === "codex") return true;
   if (provider === "gemini" || provider === "github") return true;
   if (getPassthroughProviders().has(provider)) return true;
   if (isCompatibleProvider(provider)) return true;

@@ -13,6 +13,7 @@ import Modal from "@/shared/components/Modal";
 import Toggle from "@/shared/components/Toggle";
 import Tooltip from "@/shared/components/Tooltip";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import { FieldLabelWithHelp, WeightTotalBar } from "./parts";
 import { pickDisplayValue } from "@/shared/utils/maskEmail";
 import useEmailPrivacyStore from "@/store/emailPrivacyStore";
 import { useNotificationStore } from "@/store/notificationStore";
@@ -156,6 +157,8 @@ const ADVANCED_FIELD_HELP_FALLBACK = {
     "Round-robin combo/model limit: max simultaneous requests sent to each model target. This is separate from any provider account-only cap.",
   queueTimeout:
     "How long a request can wait for a round-robin model slot before timing out. This queue is separate from any account-only concurrency cap.",
+  stickyLimit:
+    "Round-robin sticky batch size: consecutive successful requests sent to one target before rotating to the next. Empty inherits the global Sticky Limit setting; 1 disables batching (pure one-request rotation).",
   failoverBeforeRetry:
     "When enabled, a 429 from the upstream triggers immediate target failover instead of retrying the same URL first.",
   targetTimeoutMs:
@@ -1418,23 +1421,6 @@ function StrategyRecommendationsPanel({ strategy, onApply, showNudge }) {
   );
 }
 
-function FieldLabelWithHelp({ label, help, showHelp = true, htmlFor = undefined }) {
-  return (
-    <div className="flex items-center gap-1 mb-0.5">
-      <label htmlFor={htmlFor} className="text-[10px] text-text-muted">
-        {label}
-      </label>
-      {showHelp && (
-        <Tooltip position="bottom" content={help}>
-          <span className="material-symbols-outlined text-[12px] text-text-muted cursor-help">
-            help
-          </span>
-        </Tooltip>
-      )}
-    </div>
-  );
-}
-
 function ComboReadinessPanel({ checks, blockers, showDescription = true }) {
   const t = useTranslations("combos");
   const hasBlockers = blockers.length > 0;
@@ -1950,6 +1936,9 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
   const [builderProviderId, setBuilderProviderId] = useState("");
   const [builderModelId, setBuilderModelId] = useState("");
   const [builderConnectionId, setBuilderConnectionId] = useState(COMBO_BUILDER_AUTO_CONNECTION);
+  // #3266: optional account allowlist — scopes an auto-selecting step's round-robin
+  // to a subset of the provider's connections. Empty = whole active pool.
+  const [builderAllowedConnectionIds, setBuilderAllowedConnectionIds] = useState<string[]>([]);
   const [manualModelInput, setManualModelInput] = useState("");
   const [manualModelError, setManualModelError] = useState("");
   const [builderComboRefName, setBuilderComboRefName] = useState("");
@@ -2075,6 +2064,11 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
       ? selectedBuilderConnections.find((connection) => connection.id === builderConnectionId) ||
         null
       : null;
+  // Defensive: only carry allowlist ids that still belong to the selected provider's
+  // connections, so stale ids from a previous provider can never leak into a step.
+  const builderEffectiveAllowedConnectionIds = builderAllowedConnectionIds.filter((id) =>
+    selectedBuilderConnections.some((connection) => connection.id === id)
+  );
   const builderCandidateStep =
     selectedBuilderProvider && selectedBuilderModel
       ? buildPrecisionComboModelStep({
@@ -2083,6 +2077,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
           connectionId:
             builderConnectionId !== COMBO_BUILDER_AUTO_CONNECTION ? builderConnectionId : null,
           connectionLabel: selectedBuilderConnection?.label || null,
+          allowedConnectionIds: builderEffectiveAllowedConnectionIds,
         })
       : null;
   const builderHasDuplicate =
@@ -2250,6 +2245,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
     setBuilderProviderId("");
     setBuilderModelId("");
     setBuilderConnectionId(COMBO_BUILDER_AUTO_CONNECTION);
+    setBuilderAllowedConnectionIds([]);
     setManualModelInput("");
     setManualModelError("");
     setBuilderComboRefName("");
@@ -2348,6 +2344,16 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
     setBuilderProviderId(nextProviderId);
     setBuilderModelId("");
     setBuilderConnectionId(COMBO_BUILDER_AUTO_CONNECTION);
+    setBuilderAllowedConnectionIds([]);
+    setBuilderError("");
+  };
+
+  const handleBuilderAllowedConnectionToggle = (connectionId: string) => {
+    setBuilderAllowedConnectionIds((prev) =>
+      prev.includes(connectionId)
+        ? prev.filter((id) => id !== connectionId)
+        : [...prev, connectionId]
+    );
     setBuilderError("");
   };
 
@@ -2395,6 +2401,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
       connectionId:
         builderConnectionId !== COMBO_BUILDER_AUTO_CONNECTION ? builderConnectionId : null,
       connectionLabel: selectedBuilderConnection?.label || null,
+      allowedConnectionIds: builderEffectiveAllowedConnectionIds,
     });
 
     if (hasExactModelStepDuplicate(models, nextStep)) {
@@ -2411,6 +2418,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
     const nextModels = [...models, nextStep];
     setModels(nextModels);
     setBuilderError("");
+    setBuilderAllowedConnectionIds([]);
     setBuilderConnectionId(
       findNextSuggestedConnectionId(
         nextModels,
@@ -2693,6 +2701,8 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
       if (config.concurrencyPerModel !== undefined)
         configToSave.concurrencyPerModel = config.concurrencyPerModel;
       if (config.queueTimeoutMs !== undefined) configToSave.queueTimeoutMs = config.queueTimeoutMs;
+      if (config.stickyRoundRobinLimit !== undefined)
+        configToSave.stickyRoundRobinLimit = config.stickyRoundRobinLimit;
     }
     const hasConfigToSave = Object.keys(configToSave).length > 0;
     const hadExistingConfig = Object.keys(sanitizeComboRuntimeConfig(combo?.config)).length > 0;
@@ -3165,6 +3175,46 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
                     </select>
                   </div>
                 </div>
+
+                {builderConnectionId === COMBO_BUILDER_AUTO_CONNECTION &&
+                selectedBuilderConnections.length > 1 ? (
+                  <div className="mt-2 rounded-md border border-black/8 dark:border-white/8 bg-white/70 dark:bg-white/[0.03] px-2.5 py-2">
+                    <label className="text-[10px] font-medium uppercase tracking-wide text-text-muted block mb-1.5">
+                      {getI18nOrFallback(
+                        t,
+                        "builderRestrictAccounts",
+                        "Restrict to accounts (optional)"
+                      )}
+                    </label>
+                    <div className="flex flex-wrap gap-1.5" data-testid="combo-builder-allowlist">
+                      {selectedBuilderConnections.map((connection) => {
+                        const checked = builderAllowedConnectionIds.includes(connection.id);
+                        return (
+                          <button
+                            type="button"
+                            key={connection.id}
+                            onClick={() => handleBuilderAllowedConnectionToggle(connection.id)}
+                            aria-pressed={checked}
+                            className={`text-[11px] px-2 py-1 rounded border transition-colors ${
+                              checked
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "border-black/10 dark:border-white/10 text-text-muted hover:border-primary/40"
+                            }`}
+                          >
+                            {pickDisplayValue([connection.label], emailsVisible, connection.label)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-text-muted mt-1.5">
+                      {getI18nOrFallback(
+                        t,
+                        "builderRestrictAccountsHint",
+                        "Leave empty to use the whole active pool. When selected, round-robin / weighted picks stay within this subset of accounts."
+                      )}
+                    </p>
+                  </div>
+                ) : null}
 
                 {isExpertMode ? (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -3743,6 +3793,33 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
                           className="w-full text-xs py-1.5 px-2 rounded border border-black/10 dark:border-white/10 bg-transparent focus:border-primary focus:outline-none"
                         />
                       </div>
+                      <div className="col-span-2">
+                        <FieldLabelWithHelp
+                          label={getI18nOrFallback(t, "stickyLimit", "Sticky Limit")}
+                          help={getI18nOrFallback(
+                            t,
+                            "advancedHelp.stickyLimit",
+                            ADVANCED_FIELD_HELP_FALLBACK.stickyLimit
+                          )}
+                          showHelp={!isExpertMode}
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          max="1000"
+                          value={config.stickyRoundRobinLimit ?? ""}
+                          placeholder={getI18nOrFallback(t, "stickyLimitInherit", "inherit")}
+                          onChange={(e) =>
+                            setConfig({
+                              ...config,
+                              stickyRoundRobinLimit: e.target.value
+                                ? Number(e.target.value)
+                                : undefined,
+                            })
+                          }
+                          className="w-full text-xs py-1.5 px-2 rounded border border-black/10 dark:border-white/10 bg-transparent focus:border-primary focus:outline-none"
+                        />
+                      </div>
                     </div>
                   )}
                   {strategy === "context-relay" && (
@@ -4264,59 +4341,5 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
 }
 
 // ─────────────────────────────────────────────
-// Weight Total Bar
-// ─────────────────────────────────────────────
-function WeightTotalBar({ models }) {
-  const total = models.reduce((sum, m) => sum + (m.weight || 0), 0);
-  const isValid = total === 100;
-  const colors = [
-    "bg-blue-500",
-    "bg-emerald-500",
-    "bg-amber-500",
-    "bg-purple-500",
-    "bg-rose-500",
-    "bg-cyan-500",
-    "bg-orange-500",
-    "bg-indigo-500",
-  ];
-
-  return (
-    <div className="mt-1.5">
-      {/* Visual bar */}
-      <div className="h-1.5 rounded-full bg-black/5 dark:bg-white/5 overflow-hidden flex">
-        {models.map((m, i) => {
-          if (!m.weight) return null;
-          return (
-            <div
-              key={i}
-              className={`${colors[i % colors.length]} transition-all duration-300`}
-              style={{ width: `${Math.min(m.weight, 100)}%` }}
-            />
-          );
-        })}
-      </div>
-      <div className="flex items-center justify-between mt-0.5">
-        <div className="flex gap-1">
-          {models.map(
-            (m, i) =>
-              m.weight > 0 && (
-                <span key={i} className="flex items-center gap-0.5 text-[9px] text-text-muted">
-                  <span
-                    className={`inline-block w-1.5 h-1.5 rounded-full ${colors[i % colors.length]}`}
-                  />
-                  {m.weight}%
-                </span>
-              )
-          )}
-        </div>
-        <span
-          className={`text-[10px] font-medium ${
-            isValid ? "text-emerald-500" : total > 100 ? "text-red-500" : "text-amber-500"
-          }`}
-        >
-          {total}%{!isValid && total > 0 && " ≠ 100%"}
-        </span>
-      </div>
-    </div>
-  );
-}
+// WeightTotalBar moved to ./WeightTotalBar.tsx (re-exported via ./parts).
+// PR-1 of diegosouzapw/OmniRoute#3932 — pure presentational component.

@@ -157,62 +157,65 @@ export const DEFAULT_PRICING = {
   // OAuth Providers (using aliases)
 
   // Claude Code (cc)
+  // Rates aligned with Anthropic's published per-MTok pricing
+  // (https://platform.claude.com/docs/en/about-claude/pricing).
+  // Cache write = 1.25x input, cache hit = 0.1x input, reasoning = output rate.
   cc: {
     "claude-fable-5": {
-      input: 5.0,
-      output: 25.0,
-      cached: 2.5,
-      reasoning: 37.5,
-      cache_creation: 5.0,
+      input: 10.0,
+      output: 50.0,
+      cached: 1.0,
+      reasoning: 50.0,
+      cache_creation: 12.5,
     },
     "claude-opus-4-8": {
       input: 5.0,
       output: 25.0,
-      cached: 2.5,
+      cached: 0.5,
       reasoning: 25.0,
-      cache_creation: 5.0,
+      cache_creation: 6.25,
     },
     "claude-opus-4-7": {
       input: 5.0,
       output: 25.0,
-      cached: 2.5,
+      cached: 0.5,
       reasoning: 25.0,
-      cache_creation: 5.0,
+      cache_creation: 6.25,
     },
     "claude-opus-4-6": {
       input: 5.0,
       output: 25.0,
-      cached: 2.5,
+      cached: 0.5,
       reasoning: 25.0,
-      cache_creation: 5.0,
+      cache_creation: 6.25,
     },
     "claude-sonnet-4-6": {
       input: 3.0,
       output: 15.0,
-      cached: 1.5,
+      cached: 0.3,
       reasoning: 15.0,
-      cache_creation: 3.0,
+      cache_creation: 3.75,
     },
     "claude-opus-4-5-20251101": {
-      input: 15.0,
-      output: 75.0,
-      cached: 7.5,
-      reasoning: 75.0,
-      cache_creation: 15.0,
+      input: 5.0,
+      output: 25.0,
+      cached: 0.5,
+      reasoning: 25.0,
+      cache_creation: 6.25,
     },
     "claude-sonnet-4-5-20250929": {
       input: 3.0,
       output: 15.0,
-      cached: 1.5,
+      cached: 0.3,
       reasoning: 15.0,
-      cache_creation: 3.0,
+      cache_creation: 3.75,
     },
     "claude-haiku-4-5-20251001": {
-      input: 0.5,
-      output: 2.5,
-      cached: 0.25,
-      reasoning: 2.5,
-      cache_creation: 0.5,
+      input: 1.0,
+      output: 5.0,
+      cached: 0.1,
+      reasoning: 5.0,
+      cache_creation: 1.25,
     },
   },
 
@@ -652,10 +655,21 @@ export const DEFAULT_PRICING = {
   // OpenAI
   openai: {
     "gpt-5.5": GPT_5_5_PRICING,
+    // The -pro tier mirrors its base family pricing until OpenAI publishes a
+    // distinct pro rate; without these rows the openai provider's gpt-5.x-pro
+    // models (in the registry) resolved to $0 and tripped the catalog pricing gate.
+    "gpt-5.5-pro": GPT_5_5_PRICING,
     // gpt-5.4 family (public API tier; mirrors the codex 5.4 tier for the
     // base/mini, with a lower nano tier). Without these rows the openai
     // provider's gpt-5.4* models resolved to $0.
     "gpt-5.4": {
+      input: 5.0,
+      output: 20.0,
+      cached: 2.5,
+      reasoning: 30.0,
+      cache_creation: 5.0,
+    },
+    "gpt-5.4-pro": {
       input: 5.0,
       output: 20.0,
       cached: 2.5,
@@ -682,6 +696,20 @@ export const DEFAULT_PRICING = {
       cached: 0.5,
       reasoning: 12.0,
       cache_creation: 2.0,
+    },
+    "gpt-4.1-mini": {
+      input: 0.4,
+      output: 1.6,
+      cached: 0.1,
+      reasoning: 2.4,
+      cache_creation: 0.4,
+    },
+    "gpt-4.1-nano": {
+      input: 0.1,
+      output: 0.4,
+      cached: 0.025,
+      reasoning: 0.6,
+      cache_creation: 0.1,
     },
     "gpt-4o": {
       input: 2.5,
@@ -710,6 +738,20 @@ export const DEFAULT_PRICING = {
       cached: 0.5,
       reasoning: 12.0,
       cache_creation: 2.0,
+    },
+    "o3-mini": {
+      input: 1.1,
+      output: 4.4,
+      cached: 0.55,
+      reasoning: 6.6,
+      cache_creation: 1.1,
+    },
+    "o4-mini": {
+      input: 1.1,
+      output: 4.4,
+      cached: 0.275,
+      reasoning: 6.6,
+      cache_creation: 1.1,
     },
     "gpt-4-turbo": {
       input: 10.0,

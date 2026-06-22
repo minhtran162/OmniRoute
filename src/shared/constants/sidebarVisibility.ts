@@ -9,8 +9,9 @@ export const HIDEABLE_SIDEBAR_ITEM_IDS = [
   "combos",
   "combos-live",
   "quota",
-  // OmniProxy > Compression Context
+  // OmniProxy > Compression Context (Settings → Combos → engines → Studio)
   "context-settings",
+  "context-combos",
   "context-caveman",
   "context-rtk",
   "context-headroom",
@@ -20,7 +21,6 @@ export const HIDEABLE_SIDEBAR_ITEM_IDS = [
   "context-lite",
   "context-aggressive",
   "context-ultra",
-  "context-combos",
   "compression-studio",
   // OmniProxy > Tools
   "cli-code",
@@ -92,6 +92,7 @@ export const HIDEABLE_SIDEBAR_ITEM_IDS = [
   "settings-resilience",
   "settings-advanced",
   "settings-security",
+  "settings-access-tokens",
   "settings-feature-flags",
   "settings-sidebar",
   // Help
@@ -234,6 +235,7 @@ export const COMPRESSION_CONTEXT_GROUP: SidebarItemGroup = {
   id: "compression-context",
   titleKey: "compressionContextGroup",
   titleFallback: "Compression Context",
+  // Order: Settings (the unified panel) → Combos → per-engine pages → Studio (analytics).
   items: [
     {
       id: "context-settings",
@@ -242,6 +244,13 @@ export const COMPRESSION_CONTEXT_GROUP: SidebarItemGroup = {
       labelFallback: "Compression Settings",
       subtitleFallback: "Global defaults",
       icon: "settings",
+    },
+    {
+      id: "context-combos",
+      href: "/dashboard/context/combos",
+      i18nKey: "contextCombos",
+      subtitleKey: "contextCombosSubtitle",
+      icon: "hub",
     },
     {
       id: "context-caveman",
@@ -312,13 +321,6 @@ export const COMPRESSION_CONTEXT_GROUP: SidebarItemGroup = {
       labelFallback: "Ultra",
       subtitleFallback: "Heuristic pruning",
       icon: "bolt",
-    },
-    {
-      id: "context-combos",
-      href: "/dashboard/context/combos",
-      i18nKey: "contextCombos",
-      subtitleKey: "contextCombosSubtitle",
-      icon: "hub",
     },
     {
       id: "compression-studio",
@@ -788,6 +790,14 @@ const CONFIGURATION_ITEMS: readonly SidebarItemDefinition[] = [
     icon: "shield",
   },
   {
+    id: "settings-access-tokens",
+    href: "/dashboard/settings/access-tokens",
+    i18nKey: "settingsAccessTokens",
+    labelFallback: "Access Tokens",
+    subtitleKey: "settingsAccessTokensSubtitle",
+    icon: "key",
+  },
+  {
     id: "settings-feature-flags",
     href: "/dashboard/settings/feature-flags",
     i18nKey: "settingsFeatureFlags",
@@ -999,6 +1009,7 @@ const ADMIN_SHOWN: ReadonlySet<HideableSidebarItemId> = new Set([
   "settings-routing",
   "settings-resilience",
   "settings-security",
+  "settings-access-tokens",
   "settings-feature-flags",
   "settings-sidebar",
   "docs",
