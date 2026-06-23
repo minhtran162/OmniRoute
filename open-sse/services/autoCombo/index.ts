@@ -6,12 +6,14 @@ export {
   calculateTierScore,
   scorePool,
   validateWeights,
+} from "./scoring";
+export {
   DEFAULT_WEIGHTS,
   type ScoringWeights,
   type ScoringFactors,
   type ProviderCandidate,
   type ScoredProvider,
-} from "./scoring";
+} from "./types";
 export { getTaskFitness, getTaskTypes } from "./taskFitness";
 export { SelfHealingManager, getSelfHealingManager } from "./selfHealing";
 export { MODE_PACKS, getModePack, getModePackNames } from "./modePacks";

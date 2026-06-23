@@ -310,7 +310,7 @@
     "knip": "^6.18.0",
     "license-checker-rseidelsohn": "^5.0.1",
     "lint-staged": "^17.0.8",
-    "lockfile-lint": "^5.0.0",
+    "lockfile-lint": "^4.7.4",
     "node-loader": "^2.1.0",
     "prettier": "^3.8.3",
     "size-limit": "^12.1.0",

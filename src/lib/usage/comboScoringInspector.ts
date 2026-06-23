@@ -10,11 +10,13 @@ import { getCircuitBreaker } from "@/shared/utils/circuitBreaker";
 import {
   calculateFactors,
   calculateScore,
+} from "@omniroute/open-sse/services/autoCombo/scoring.ts";
+import {
   DEFAULT_WEIGHTS,
   type ProviderCandidate,
   type ScoringFactors,
   type ScoringWeights,
-} from "@omniroute/open-sse/services/autoCombo/scoring.ts";
+} from "@omniroute/open-sse/services/autoCombo/types.ts";
 import { getTaskFitness } from "@omniroute/open-sse/services/autoCombo/taskFitness.ts";
 import type {
   ComboAutopilotCombo,

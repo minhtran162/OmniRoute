@@ -8,26 +8,8 @@ import {
   getRecommendedMinTier,
 } from "./specificityDetector";
 import type { RuleInput } from "./specificityTypes";
-import type { ResolvedComboTarget } from "./combo";
-
-export type StrategyModifier =
-  | "default"
-  | "prefer-free"
-  | "prefer-cheap"
-  | "require-premium"
-  | "cost-save"
-  | "quality-first";
-
-export interface RoutingHint {
-  tierAssignments: Map<string, TierAssignment>;
-  specificity: SpecificityResult;
-  specificityLevel: SpecificityLevel;
-  recommendedMinTier: ProviderTier;
-  eligibleTargets: ResolvedComboTarget[];
-  overqualifiedTargets: ResolvedComboTarget[];
-  underqualifiedTargets: ResolvedComboTarget[];
-  strategyModifier: StrategyModifier;
-}
+import type { ResolvedComboTarget } from "./combo/types.ts";
+import type { RoutingHint, StrategyModifier } from "./manifestAdapterTypes.ts";
 
 export function generateRoutingHints(
   targets: ResolvedComboTarget[],

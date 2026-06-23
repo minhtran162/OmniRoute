@@ -69,13 +69,13 @@ import {
   DEFAULT_WEIGHTS,
   type ProviderCandidate,
   type ScoringWeights,
-} from "./autoCombo/scoring.ts";
+} from "./autoCombo/types.ts";
 import { supportsToolCalling } from "./modelCapabilities.ts";
 import { estimateTokens } from "./contextManager.ts";
 import { getSessionConnection } from "./sessionManager.ts";
 import { orderTargetsByEvalScores } from "./evalRouting.ts";
 import { generateRoutingHints } from "./manifestAdapter";
-import type { RoutingHint } from "./manifestAdapter";
+import type { RoutingHint } from "./manifestAdapterTypes.ts";
 import { buildComplexityRoutingHint } from "./autoCombo/complexityRouter";
 import type { CompressionMode } from "./compression/types.ts";
 import { getProviderConnections } from "../../src/lib/db/providers";

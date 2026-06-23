@@ -3,8 +3,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { calculateFactors, calculateScore, DEFAULT_WEIGHTS, validateWeights } from "../scoring";
-import type { ProviderCandidate, ScoringWeights } from "../scoring";
+import { calculateFactors, calculateScore, validateWeights } from "../scoring";
+import { DEFAULT_WEIGHTS } from "../types";
+import type { ProviderCandidate, ScoringWeights } from "../types";
 import {
   getTaskFitness,
   getTaskFitnessWithSource,

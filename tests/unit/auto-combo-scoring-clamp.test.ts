@@ -15,12 +15,14 @@ import assert from "node:assert/strict";
 import {
   calculateScore,
   calculateFactors,
-  DEFAULT_WEIGHTS,
 } from "../../open-sse/services/autoCombo/scoring.ts";
+import {
+  DEFAULT_WEIGHTS,
+} from "../../open-sse/services/autoCombo/types.ts";
 import type {
   ScoringFactors,
   ProviderCandidate,
-} from "../../open-sse/services/autoCombo/scoring.ts";
+} from "../../open-sse/services/autoCombo/types.ts";
 
 const ONES: ScoringFactors = {
   quota: 1,

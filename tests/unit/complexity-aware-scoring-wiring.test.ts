@@ -8,9 +8,9 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { scoreAutoTargets } from "../../open-sse/services/combo.ts";
-import { DEFAULT_WEIGHTS } from "../../open-sse/services/autoCombo/scoring.ts";
-import type { RoutingHint } from "../../open-sse/services/manifestAdapter.ts";
+import { scoreAutoTargets } from "../../open-sse/services/combo/autoStrategy.ts";
+import { DEFAULT_WEIGHTS } from "../../open-sse/services/autoCombo/types.ts";
+import type { RoutingHint } from "../../open-sse/services/manifestAdapterTypes.ts";
 
 function target() {
   return {

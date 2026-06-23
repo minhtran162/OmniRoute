@@ -9,11 +9,13 @@ import { selectProvider, type AutoComboConfig } from "../../../open-sse/services
 import {
   calculateFactors,
   calculateScore,
-  DEFAULT_WEIGHTS,
   scorePool,
+} from "../../../open-sse/services/autoCombo/scoring";
+import {
+  DEFAULT_WEIGHTS,
   type ProviderCandidate,
   type ScoredProvider,
-} from "../../../open-sse/services/autoCombo/scoring";
+} from "../../../open-sse/services/autoCombo/types.ts";
 import { getTaskFitness } from "../../../open-sse/services/autoCombo/taskFitness";
 import { resetDiversity } from "../../../open-sse/services/autoCombo/providerDiversity";
 

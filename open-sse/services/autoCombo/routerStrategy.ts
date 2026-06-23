@@ -10,7 +10,7 @@
  *   - LKGPStrategy: tries last known good provider first
  */
 
-import type { ProviderCandidate, ScoredProvider } from "./scoring.ts";
+import type { ProviderCandidate, ScoredProvider } from "./types.ts";
 import { scorePool } from "./scoring.ts";
 import { getTaskFitness } from "./taskFitness.ts";
 import { clamp01 } from "../../utils/number.ts";

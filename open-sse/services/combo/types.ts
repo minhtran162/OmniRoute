@@ -6,7 +6,7 @@
  * — logic unchanged, re-exported from combo.ts for backward compatibility.
  */
 
-import type { ProviderCandidate } from "../autoCombo/scoring.ts";
+import type { ProviderCandidate } from "../autoCombo/types.ts";
 
 export const RESET_WINDOW_NAMES = ["weekly", "session", "monthly"] as const;
 

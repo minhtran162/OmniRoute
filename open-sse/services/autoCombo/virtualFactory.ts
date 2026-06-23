@@ -1,6 +1,6 @@
 import { AutoComboConfig } from "./engine";
 import { MODE_PACKS } from "./modePacks";
-import { DEFAULT_WEIGHTS, ScoringWeights } from "./scoring";
+import { DEFAULT_WEIGHTS, type ScoringWeights } from "./types.ts";
 import { AutoVariant } from "./autoPrefix";
 import { getProviderConnections } from "@/lib/db/providers";
 import { getSettings } from "@/lib/db/settings";

@@ -12,11 +12,13 @@
 import {
   scorePool,
   validateWeights,
+} from "./scoring";
+import {
   DEFAULT_WEIGHTS,
   type ScoringWeights,
   type ProviderCandidate,
   type ScoredProvider,
-} from "./scoring";
+} from "./types.ts";
 import { getTaskFitness } from "./taskFitness";
 import { getModePack } from "./modePacks";
 import { getSelfHealingManager } from "./selfHealing";
