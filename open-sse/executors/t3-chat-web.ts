@@ -15,7 +15,7 @@
 
 import { BaseExecutor, type ExecuteInput } from "./base.ts";
 import { sanitizeErrorMessage } from "../utils/error.ts";
-import tlsClient from "../utils/tlsClient.ts";
+import { prepareToolMessages, buildToolAwareResult } from "../translator/webTools.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -24,26 +24,8 @@ export const T3_CHAT_BASE = "https://t3.chat";
 /** TanStack Start server function endpoint prefix */
 const SERVER_FN_PREFIX = `${T3_CHAT_BASE}/_serverFn/`;
 
-const USER_AGENTS = [
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
-];
-
-function getUserAgentForCredentials(convexSessionId: string): string {
-  if (!convexSessionId) {
-    return USER_AGENTS[0];
-  }
-  let hash = 0;
-  for (let i = 0; i < convexSessionId.length; i++) {
-    hash = (hash << 5) - hash + convexSessionId.charCodeAt(i);
-    hash |= 0;
-  }
-  const index = Math.abs(hash) % USER_AGENTS.length;
-  return USER_AGENTS[index];
-}
+const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 /** TanStack Start accepts these content types, in priority order */
 const TSS_ACCEPT = "application/x-tss-framed, application/x-ndjson, application/json";
@@ -82,18 +64,18 @@ export function parseT3Credentials(creds: unknown): T3ChatCredentials {
     return { cookieHeader: "", cookies: "", convexSessionId: "" };
   }
 
-  let cookieHeader = extractCookieHeader(raw);
+  let cookieHeader = raw;
   let convexSessionId = "";
 
   if (raw.includes("convexSessionId") || raw.includes("convex-session-id")) {
     // Structured / multi-part format: split on separators and pull out the id.
-    const parts = cookieHeader.split(/[,;\n]/).map((s) => s.trim());
+    const parts = raw.split(/[,;\n]/).map((s) => s.trim());
     const cookieParts: string[] = [];
     for (const part of parts) {
       if (part.startsWith("convexSessionId=") || part.startsWith("convex-session-id=")) {
         convexSessionId = part.split("=").slice(1).join("=");
       } else if (part.startsWith("cookies=")) {
-        cookieParts.push(extractCookieHeader(part.slice("cookies=".length)));
+        cookieParts.push(part.slice("cookies=".length));
       } else if (part.includes("=")) {
         cookieParts.push(part);
       }
@@ -127,11 +109,7 @@ export function validateT3Credentials(creds: T3ChatCredentials | null | undefine
   );
 }
 
-function buildErrorResponse(
-  status: number,
-  message: string,
-  extraHeaders: Record<string, string> = {}
-): Response {
+function buildErrorResponse(status: number, message: string): Response {
   return new Response(
     JSON.stringify({
       error: {
@@ -140,67 +118,22 @@ function buildErrorResponse(
         code: `HTTP_${status}`,
       },
     }),
-    { status, headers: { "Content-Type": "application/json", ...extraHeaders } }
+    { status, headers: { "Content-Type": "application/json" } }
   );
-}
-
-function extractCookieHeader(raw: string): string {
-  const lines = raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const cookieLine = lines.find((line) => /^cookie\s*:/i.test(line));
-  const value = cookieLine || raw.trim();
-  return value.replace(/^cookie\s*:\s*/i, "").trim();
-}
-
-function isVercelSecurityCheckpoint(contentType: string | null, body: string): boolean {
-  return (
-    Boolean(contentType?.toLowerCase().includes("text/html")) &&
-    /vercel\s+security\s+checkpoint/i.test(body)
-  );
-}
-
-function isT3TlsFallbackAvailable(): boolean {
-  if (process.env.OMNIROUTE_T3_TLS_FALLBACK === "0") return false;
-  return Boolean(tlsClient.available);
-}
-
-async function fetchT3WithTls(url: string, options: RequestInit): Promise<Response> {
-  return tlsClient.fetch(url, options);
 }
 
 /**
  * Build standard TanStack Start headers matching live captured traffic.
  * The x-deployment-id header is optional but helps CDN routing.
  */
-function buildServerFnHeaders(
-  cookieHeader: string,
-  convexSessionId: string
-): Record<string, string> {
-  const randomHex = (len: number) =>
-    Array.from(crypto.getRandomValues(new Uint8Array(len)))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-
-  const traceId = randomHex(16);
-  const spanId = randomHex(8);
-
+function buildServerFnHeaders(cookieHeader: string): Record<string, string> {
   return {
     "Content-Type": "application/json",
-    "User-Agent": getUserAgentForCredentials(convexSessionId),
+    "User-Agent": USER_AGENT,
     Accept: TSS_ACCEPT,
-    "Accept-Language": "en-US,en;q=0.9",
     Cookie: cookieHeader,
     Referer: `${T3_CHAT_BASE}/`,
     Origin: T3_CHAT_BASE,
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "same-origin",
-    "x-client-context": "eyJjbGllbnQiOnsidmVyc2lvbiI6IjEuMTIuNCJ9LCJpbnRlZ3JpdHkiOnsidiI6dHJ1ZSwiYzIiOiJ1bnZlcmlmaWVkIn19",
-    "x-deployment-id": "dpl_DuTqj6zv6mSyg3gYAaLP7kCqa3kP",
-    "b3": `${traceId}-${spanId}-1-${randomHex(16)}`,
-    "traceparent": `00-${traceId}-${spanId}-01`,
   };
 }
 
@@ -218,90 +151,90 @@ function transformTSSStream(upstreamStream: ReadableStream, model: string): Read
 
   return new ReadableStream(
     {
-      async start(controller) {
-        const reader = upstreamStream.getReader();
-        let buffer = "";
+    async start(controller) {
+      const reader = upstreamStream.getReader();
+      let buffer = "";
 
-        const emit = (obj: object) => {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-        };
+      const emit = (obj: object) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      };
 
-        const chunk = (delta: object, finish?: string | null) => {
-          emit({
-            id,
-            object: "chat.completion.chunk",
-            created,
-            model,
-            choices: [{ index: 0, delta, finish_reason: finish ?? null }],
-          });
-        };
+      const chunk = (delta: object, finish?: string | null) => {
+        emit({
+          id,
+          object: "chat.completion.chunk",
+          created,
+          model,
+          choices: [{ index: 0, delta, finish_reason: finish ?? null }],
+        });
+      };
 
-        const close = () => {
-          if (!emittedRole) {
-            emittedRole = true;
-            chunk({ role: "assistant", content: "" });
-          }
-          chunk({}, "stop");
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
-        };
+      const close = () => {
+        if (!emittedRole) {
+          emittedRole = true;
+          chunk({ role: "assistant", content: "" });
+        }
+        chunk({}, "stop");
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      };
 
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-            buffer += decoder.decode(value, { stream: true });
+          buffer += decoder.decode(value, { stream: true });
 
-            // Handle both NDJSON (newline-delimited) and SSE (data: prefix) formats
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
+          // Handle both NDJSON (newline-delimited) and SSE (data: prefix) formats
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
 
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (!trimmed) continue;
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
 
-              // SSE format: "data: {...}"
-              const payload = trimmed.startsWith("data: ") ? trimmed.slice(6).trim() : trimmed;
+            // SSE format: "data: {...}"
+            const payload = trimmed.startsWith("data: ") ? trimmed.slice(6).trim() : trimmed;
 
-              if (payload === "[DONE]") {
-                close();
-                return;
+            if (payload === "[DONE]") {
+              close();
+              return;
+            }
+
+            let data: Record<string, unknown>;
+            try {
+              data = JSON.parse(payload);
+            } catch {
+              continue;
+            }
+
+            // TSS format: extract text content from typed envelope
+            // t:10 = object with keys in p.k and values in p.v
+            // t:0 = number (value in s), t:2 = string (value in s), t:9 = array
+            const textContent = extractTextFromTSS(data);
+
+            if (typeof textContent === "string" && textContent.length > 0) {
+              if (!emittedRole) {
+                emittedRole = true;
+                chunk({ role: "assistant", content: "" });
               }
+              chunk({ content: textContent });
+            }
 
-              let data: Record<string, unknown>;
-              try {
-                data = JSON.parse(payload);
-              } catch {
-                continue;
-              }
-
-              // TSS format: extract text content from typed envelope
-              // t:10 = object with keys in p.k and values in p.v
-              // t:0 = number (value in s), t:2 = string (value in s), t:9 = array
-              const textContent = extractTextFromTSS(data);
-
-              if (typeof textContent === "string" && textContent.length > 0) {
-                if (!emittedRole) {
-                  emittedRole = true;
-                  chunk({ role: "assistant", content: "" });
-                }
-                chunk({ content: textContent });
-              }
-
-              // Detect end-of-stream markers
-              if (isTSSDone(data)) {
-                close();
-                return;
-              }
+            // Detect end-of-stream markers
+            if (isTSSDone(data)) {
+              close();
+              return;
             }
           }
-        } catch {
-          // Stream error — fall through to close
         }
+      } catch {
+        // Stream error — fall through to close
+      }
 
-        close();
-      },
+      close();
+    },
     },
     { highWaterMark: 16384 }
   );
@@ -399,7 +332,7 @@ export class T3ChatWebExecutor extends BaseExecutor {
       const resp = await fetch(T3_CHAT_BASE, {
         method: "HEAD",
         headers: {
-          "User-Agent": getUserAgentForCredentials(parsed.convexSessionId),
+          "User-Agent": USER_AGENT,
           Cookie: parsed.cookieHeader,
         },
         signal,
@@ -412,15 +345,15 @@ export class T3ChatWebExecutor extends BaseExecutor {
 
   async execute({ model, body, stream, credentials, signal, log }: ExecuteInput) {
     const bodyObj = (body || {}) as Record<string, unknown>;
-    const messages = (Array.isArray(bodyObj.messages) ? bodyObj.messages : []) as Array<{
+    const rawMessages = (Array.isArray(bodyObj.messages) ? bodyObj.messages : []) as Array<{
       role: string;
       content: string | unknown;
     }>;
+    const { hasTools, requestedTools, effectiveMessages } = prepareToolMessages(bodyObj, rawMessages);
     // 1. Parse + validate credentials. The credential pipeline stores the single
     // pasted string as `apiKey` (fallback `accessToken`); parse out the Cookie
     // header + convex-session-id (#3007) instead of expecting pre-structured fields.
     const parsed = parseT3Credentials(credentials);
-
     if (!validateT3Credentials(parsed)) {
       return {
         response: buildErrorResponse(
@@ -434,53 +367,17 @@ export class T3ChatWebExecutor extends BaseExecutor {
     }
 
     const cookieHeader = parsed.cookieHeader;
-    const convexSessionId = parsed.convexSessionId;
-    const headers = buildServerFnHeaders(cookieHeader, convexSessionId);
-
-    // Add small jitter to avoid burst detection when multiple accounts hit rate limits
-    const jitterMs = Math.floor(Math.random() * 150);
-    if (jitterMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, jitterMs));
-    }
+    const headers = buildServerFnHeaders(cookieHeader);
 
     try {
-      // 2. Build request payload for t3.chat /api/chat endpoint
-      // t3.chat uses a custom Convex-based format, NOT OpenAI format.
-      // Convert OpenAI messages to t3.chat format with parts, ids, etc.
-      const t3Messages = messages.map((msg) => ({
-        id: crypto.randomUUID(),
-        role: msg.role,
-        parts: [{ text: msg.content, type: "text" }],
-        attachments: [],
-      }));
-
-      // Add assistant response placeholder
-      const responseMessageId = crypto.randomUUID();
-
+      // 2. Build request payload for chat completion server function
+      // t3.chat uses TanStack Start server functions. The chat completion
+      // endpoint hash is deployment-specific. The API accepts OpenAI-compatible
+      // fields (model, messages, stream) in the request body.
       const requestPayload: Record<string, unknown> = {
-        messages: t3Messages,
-        threadMetadata: { id: crypto.randomUUID() },
         model,
-        convexSessionId,
-        clientAuth: { isSignedIn: true },
-        responseMessageId,
-        modelParams: {
-          reasoningEffort: "none",
-          includeSearch: false,
-          searchLimit: 1,
-        },
-        preferences: {},
-        userConfiguration: {
-          currentlySelectedModel: model,
-          currentModelParameters: { includeSearch: false },
-          favoriteModels: [model],
-        },
-        hcaptchaToken: "",
-        userInfo: {
-          timezone: "UTC",
-          locale: "en-US",
-        },
-        isEphemeral: false,
+        messages: effectiveMessages,
+        stream: stream !== false,
       };
 
       // The completion endpoint — try the known /api/chat path first (some t3.chat
@@ -489,71 +386,26 @@ export class T3ChatWebExecutor extends BaseExecutor {
 
       log?.info?.("T3-CHAT-WEB", `POST ${completionUrl} model=${model}`);
 
-      const requestOptions: RequestInit = {
+      const resp = await fetch(completionUrl, {
         method: "POST",
         headers,
         body: JSON.stringify(requestPayload),
         signal,
-      };
-
-      let transport = "fetch";
-      let resp = await fetch(completionUrl, requestOptions);
-      let tlsFallbackAttempted = false;
-      let fetchCheckpointBlocked = false;
-      if (!resp.ok) {
-        const fetchErrorText = await resp
-          .clone()
-          .text()
-          .catch(() => "");
-        fetchCheckpointBlocked = isVercelSecurityCheckpoint(
-          resp.headers.get("content-type"),
-          fetchErrorText
-        );
-        if (resp.status === 429 && fetchCheckpointBlocked && isT3TlsFallbackAvailable()) {
-          tlsFallbackAttempted = true;
-          try {
-            resp = await fetchT3WithTls(completionUrl, requestOptions);
-            transport = "tls-client";
-          } catch (tlsErr) {
-            const tlsMsg = tlsErr instanceof Error ? tlsErr.message : String(tlsErr);
-            log?.error?.("T3-CHAT-WEB", `TLS fallback failed: ${tlsMsg}`);
-          }
-        }
-      }
+      });
 
       // 3. Handle HTTP errors
       if (!resp.ok) {
         const status = resp.status;
         let errMsg = `t3.chat API error (${status})`;
-        const upstreamText = await resp
-          .clone()
-          .text()
-          .catch(() => "");
-        const contentType = resp.headers.get("content-type");
-        const checkpointBlocked = isVercelSecurityCheckpoint(contentType, upstreamText);
         if (status === 401 || status === 403) {
           errMsg =
             "t3.chat session expired or unauthorized — re-paste your cookies and convex-session-id.";
-        } else if (status === 429 && checkpointBlocked) {
-          errMsg =
-            "t3.chat blocked this request with Vercel Security Checkpoint bot protection. Open t3.chat in the browser, complete the checkpoint, then re-paste fresh cookies.";
-        } else if (status === 400 && upstreamText.includes("captcha_failed")) {
-          errMsg =
-            "t3.chat requires CAPTCHA verification. Please solve the CAPTCHA in your browser and try again.";
         } else if (status === 429) {
-          const retryAfter = resp.headers.get("retry-after");
-          const retryHint = retryAfter ? ` Retry after ${retryAfter}s.` : "";
-          const upstreamHint = upstreamText ? ` Upstream: ${upstreamText.slice(0, 300)}` : "";
-          errMsg = `t3.chat rate limited this session.${retryHint}${upstreamHint}`;
-        } else if (upstreamText) {
-          errMsg = `${errMsg}: ${upstreamText.slice(0, 300)}`;
+          errMsg = "t3.chat rate limited. Wait and retry.";
         }
-        const errorHeaders: Record<string, string> = {};
-        const retryAfter = resp.headers.get("retry-after");
-        if (retryAfter) errorHeaders["Retry-After"] = retryAfter;
         log?.warn?.("T3-CHAT-WEB", errMsg);
         return {
-          response: buildErrorResponse(status, errMsg, errorHeaders),
+          response: buildErrorResponse(status, errMsg),
           url: completionUrl,
           headers,
           transformedBody: requestPayload,
@@ -637,7 +489,37 @@ export class T3ChatWebExecutor extends BaseExecutor {
       }
 
       // Non-streaming: collect all content and return OpenAI JSON
-      const content = await collectStreamContent(resp.body);
+      const rawContent = await collectStreamContent(resp.body);
+
+      if (hasTools) {
+        const { content, toolCalls, finishReason } = buildToolAwareResult(rawContent, requestedTools, "t3");
+        if (toolCalls) {
+          return {
+            response: new Response(
+              JSON.stringify({
+                id: `chatcmpl-t3-${Date.now()}`, object: "chat.completion",
+                created: Math.floor(Date.now() / 1000), model: model || "unknown",
+                choices: [{ index: 0, message: { role: "assistant", content: null, tool_calls: toolCalls }, finish_reason: finishReason }],
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } }
+            ),
+            url: completionUrl, headers, transformedBody: requestPayload,
+          };
+        }
+        const openaiResponse = {
+          id: `chatcmpl-t3-${Date.now()}`, object: "chat.completion",
+          created: Math.floor(Date.now() / 1000), model: model || "unknown",
+          choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        };
+        return {
+          response: new Response(JSON.stringify(openaiResponse), {
+            status: 200, headers: { "Content-Type": "application/json" },
+          }),
+          url: completionUrl, headers, transformedBody: requestPayload,
+        };
+      }
+
       const openaiResponse = {
         id: `chatcmpl-t3-${Date.now()}`,
         object: "chat.completion",
@@ -646,7 +528,7 @@ export class T3ChatWebExecutor extends BaseExecutor {
         choices: [
           {
             index: 0,
-            message: { role: "assistant", content },
+            message: { role: "assistant", content: rawContent },
             finish_reason: "stop",
           },
         ],
