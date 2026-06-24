@@ -114,6 +114,12 @@ export default function HomePageClient({ machineId }: HomePageClientProps) {
     Array<{ id?: string; prefix?: string; name?: string }>
   >([]);
 
+  // The live in-flight request feed for the Provider Topology pulse animation is owned by
+  // <HomeProviderTopologySection>, which subscribes to it (gated by the `enabled` prop)
+  // only when the topology is actually shown. HomePageClient must NOT open its own
+  // unconditional live socket: the binding here was unused (ReferenceError in prod,
+  // #4759/#4745) and the socket opened even when topology was hidden (#4596).
+
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
   const [updating, setUpdating] = useState(false);
 

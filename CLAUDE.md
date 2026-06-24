@@ -311,7 +311,7 @@ connection continue serving other models.
 4. Create 7 API endpoints under `src/app/api/services/{name}/` (`_lib.ts`, `install`, `start`, `stop`, `restart`, `update`, `status`, `auto-start`). All delegate errors through `createErrorResponse()`. The shared `logs` endpoint is already wired via `[name]/logs/route.ts`.
 5. Verify `/api/services/` is in `LOCAL_ONLY_API_PREFIXES` in `src/server/authz/routeGuard.ts`; add a test asserting `isLocalOnlyPath()` returns `true` for the new prefix if you add one (hard rule #17).
 6. Add a UI tab in `src/app/(dashboard)/dashboard/providers/services/tabs/` reusing `ServiceStatusCard`, `ServiceLifecycleButtons`, `ServiceLogsPanel`.
-7. Document in `docs/frameworks/EMBEDDED-SERVICES.md` (update §1 service table + §4 API reference) and `docs/reference/openapi.yaml`.
+7. Document in `docs/frameworks/EMBEDDED-SERVICES.md` (update §1 service table + §4 API reference) and `docs/openapi.yaml`.
 8. Write tests: unit (`tests/unit/services/`), integration (`tests/integration/services/`, gated by `RUN_SERVICES_INT=1`), and update `docs/ops/RELEASE_CHECKLIST.md` smoke section.
 
 ### Adding a New Guardrail / Eval / Skill / Webhook event
@@ -327,32 +327,33 @@ connection continue serving other models.
 
 For any non-trivial change, read the matching deep-dive first:
 
-| Area                                         | Doc                                                               |
-| -------------------------------------------- | ----------------------------------------------------------------- |
-| Repo navigation                              | `docs/architecture/REPOSITORY_MAP.md`                             |
-| Architecture                                 | `docs/architecture/ARCHITECTURE.md`                               |
-| Engineering reference                        | `docs/architecture/CODEBASE_DOCUMENTATION.md`                     |
-| Auto-Combo (9-factor scoring, 14 strategies) | `docs/routing/AUTO-COMBO.md`                                      |
-| Resilience (3 mechanisms)                    | `docs/architecture/RESILIENCE_GUIDE.md`                           |
-| Reasoning replay                             | `docs/routing/REASONING_REPLAY.md`                                |
-| Skills framework                             | `docs/frameworks/SKILLS.md`                                       |
-| Memory system (FTS5 + Qdrant)                | `docs/frameworks/MEMORY.md`                                       |
-| Cloud agents                                 | `docs/frameworks/CLOUD_AGENT.md`                                  |
-| Guardrails (PII / injection / vision)        | `docs/security/GUARDRAILS.md`                                     |
-| Public upstream credentials (Gemini/etc.)    | `docs/security/PUBLIC_CREDS.md`                                   |
-| Error message sanitization                   | `docs/security/ERROR_SANITIZATION.md`                             |
-| Evals                                        | `docs/frameworks/EVALS.md`                                        |
-| Compliance / audit                           | `docs/security/COMPLIANCE.md`                                     |
-| Webhooks                                     | `docs/frameworks/WEBHOOKS.md`                                     |
-| Authorization pipeline                       | `docs/architecture/AUTHZ_GUIDE.md`                                |
-| Stealth (TLS / fingerprint)                  | `docs/security/STEALTH_GUIDE.md`                                  |
-| Agent protocols (A2A / ACP / Cloud)          | `docs/frameworks/AGENT_PROTOCOLS_GUIDE.md`                        |
-| MCP server                                   | `docs/frameworks/MCP-SERVER.md`                                   |
-| A2A server                                   | `docs/frameworks/A2A-SERVER.md`                                   |
-| API reference + OpenAPI                      | `docs/reference/API_REFERENCE.md` + `docs/reference/openapi.yaml` |
-| Provider catalog (auto-generated)            | `docs/reference/PROVIDER_REFERENCE.md`                            |
-| Release flow                                 | `docs/ops/RELEASE_CHECKLIST.md`                                   |
-| Embedded services                            | `docs/frameworks/EMBEDDED-SERVICES.md`                            |
+| Area                                          | Doc                                                               |
+| --------------------------------------------- | ----------------------------------------------------------------- |
+| Repo navigation                               | `docs/architecture/REPOSITORY_MAP.md`                             |
+| Architecture                                  | `docs/architecture/ARCHITECTURE.md`                               |
+| Engineering reference                         | `docs/architecture/CODEBASE_DOCUMENTATION.md`                     |
+| Auto-Combo (9-factor scoring, 15 strategies)  | `docs/routing/AUTO-COMBO.md`                                      |
+| Resilience (3 mechanisms)                     | `docs/architecture/RESILIENCE_GUIDE.md`                           |
+| Reasoning replay                              | `docs/routing/REASONING_REPLAY.md`                                |
+| Skills framework                              | `docs/frameworks/SKILLS.md`                                       |
+| Memory system (FTS5 + Qdrant)                 | `docs/frameworks/MEMORY.md`                                       |
+| Cloud agents                                  | `docs/frameworks/CLOUD_AGENT.md`                                  |
+| Guardrails (PII / injection / vision)         | `docs/security/GUARDRAILS.md`                                     |
+| Public upstream credentials (Gemini/etc.)     | `docs/security/PUBLIC_CREDS.md`                                   |
+| Error message sanitization                    | `docs/security/ERROR_SANITIZATION.md`                             |
+| Evals                                         | `docs/frameworks/EVALS.md`                                        |
+| Compliance / audit                            | `docs/security/COMPLIANCE.md`                                     |
+| Webhooks                                      | `docs/frameworks/WEBHOOKS.md`                                     |
+| Authorization pipeline                        | `docs/architecture/AUTHZ_GUIDE.md`                                |
+| Stealth (TLS / fingerprint)                   | `docs/security/STEALTH_GUIDE.md`                                  |
+| Agent protocols (A2A / ACP / Cloud)           | `docs/frameworks/AGENT_PROTOCOLS_GUIDE.md`                        |
+| MCP server                                    | `docs/frameworks/MCP-SERVER.md`                                   |
+| A2A server                                    | `docs/frameworks/A2A-SERVER.md`                                   |
+| API reference + OpenAPI                       | `docs/reference/API_REFERENCE.md` + `docs/openapi.yaml` |
+| Provider catalog (auto-generated)             | `docs/reference/PROVIDER_REFERENCE.md`                            |
+| Release flow                                  | `docs/ops/RELEASE_CHECKLIST.md`                                   |
+| Embedded services                             | `docs/frameworks/EMBEDDED-SERVICES.md`                            |
+| Quality gates (~48 scripts, allowlist policy) | `docs/architecture/QUALITY_GATES.md`                              |
 
 ---
 
