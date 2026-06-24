@@ -71,6 +71,9 @@ services:
     build:
       context: .
       target: runner-base
+      args:
+        - OMNIROUTE_BUILD_MEMORY_MB=${OMNIROUTE_BUILD_MEMORY_MB:-4096}
+        - NEXT_BUILD_CPUS=${NEXT_BUILD_CPUS:-2}
     image: omniroute:base
     ports:
       - "${DASHBOARD_PORT:-20128}:${DASHBOARD_PORT:-20128}"
@@ -85,10 +88,15 @@ services:
   omniroute-web:
     <<: *common
     container_name: omniroute
-    platform: linux/amd64
+    # On Apple Silicon (M1/M2/M3), removing the linux/amd64 platform pin
+    # significantly reduces memory usage and build time.
+    platform: ${DOCKER_DEFAULT_PLATFORM:-linux/amd64}
     build:
       context: .
       target: runner-web
+      args:
+        - OMNIROUTE_BUILD_MEMORY_MB=${OMNIROUTE_BUILD_MEMORY_MB:-4096}
+        - NEXT_BUILD_CPUS=${NEXT_BUILD_CPUS:-2}
     image: omniroute:web
     ports:
       - "${DASHBOARD_PORT:-20128}:${DASHBOARD_PORT:-20128}"
@@ -103,6 +111,9 @@ services:
     build:
       context: .
       target: runner-cli
+      args:
+        - OMNIROUTE_BUILD_MEMORY_MB=${OMNIROUTE_BUILD_MEMORY_MB:-4096}
+        - NEXT_BUILD_CPUS=${NEXT_BUILD_CPUS:-2}
     image: omniroute:cli
     ports:
       - "${DASHBOARD_PORT:-20128}:${DASHBOARD_PORT:-20128}"
