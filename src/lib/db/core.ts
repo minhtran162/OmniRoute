@@ -705,6 +705,7 @@ function ensureCallLogsColumns(db: SqliteDatabase) {
     db.exec(
       "CREATE INDEX IF NOT EXISTS idx_cl_combo_target ON call_logs(combo_name, combo_execution_key, timestamp)"
     );
+    db.exec("CREATE INDEX IF NOT EXISTS idx_cl_detail_state ON call_logs(detail_state)");
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn("[DB] Failed to verify call_logs schema:", message);
@@ -923,23 +924,8 @@ function offloadLegacyCallLogDetails(db: SqliteDatabase) {
     error: string | null;
   };
 
-  const pendingRows = db
-    .prepare(
-      `
-      SELECT legacy.*
-      FROM call_logs_v1_legacy AS legacy
-      JOIN call_logs AS current ON current.id = legacy.id
-      WHERE current.detail_state = 'legacy-inline'
-      ORDER BY legacy.timestamp ASC
-    `
-    )
-    .all() as LegacyCallLogRow[];
-
-  if (pendingRows.length === 0) {
-    db.exec("DROP TABLE IF EXISTS call_logs_v1_legacy");
-    return;
-  }
-
+  // Process in batches to avoid heap exhaustion on large datasets
+  const BATCH_SIZE = 500;
   const updateStmt = db.prepare(`
     UPDATE call_logs
     SET artifact_relpath = @artifactRelPath,
@@ -958,8 +944,30 @@ function offloadLegacyCallLogDetails(db: SqliteDatabase) {
   `);
 
   let failed = 0;
-  const tx = db.transaction(() => {
-    for (const row of pendingRows) {
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const pendingRows = db
+      .prepare(
+        `
+        SELECT legacy.*
+        FROM call_logs_v1_legacy AS legacy
+        JOIN call_logs AS current ON current.id = legacy.id
+        WHERE current.detail_state = 'legacy-inline'
+        ORDER BY legacy.timestamp ASC
+        LIMIT ? OFFSET ?
+      `
+      )
+      .all(BATCH_SIZE, offset) as LegacyCallLogRow[];
+
+    if (pendingRows.length === 0) {
+      hasMore = false;
+      break;
+    }
+
+    const tx = db.transaction(() => {
+      for (const row of pendingRows) {
       const artifact: CallLogArtifact = {
         schemaVersion: 5,
         summary: {
@@ -1015,7 +1023,14 @@ function offloadLegacyCallLogDetails(db: SqliteDatabase) {
     }
   });
 
-  tx();
+    tx();
+
+    offset += pendingRows.length;
+
+    if (pendingRows.length < BATCH_SIZE) {
+      hasMore = false;
+    }
+  }
 
   if (failed > 0) {
     console.warn(
@@ -1028,7 +1043,7 @@ function offloadLegacyCallLogDetails(db: SqliteDatabase) {
   try {
     db.pragma("wal_checkpoint(TRUNCATE)");
     db.exec("VACUUM");
-    console.log(`[DB] Offloaded ${pendingRows.length} legacy call log detail row(s) to artifacts.`);
+    console.log(`[DB] Offloaded ${offset} legacy call log detail row(s) to artifacts.`);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn("[DB] Legacy call log compaction finished without VACUUM:", message);
