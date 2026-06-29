@@ -142,6 +142,30 @@ function StreamSection({ title, json, onCopy }) {
 
 type StreamChunks = Record<string, string | string[]>;
 
+function getCodexAccountRotation(detail) {
+  const sources = [detail?.requestBody, detail?.responseBody];
+
+  for (const source of sources) {
+    const meta = source?._omniroute;
+    const rotation = meta?.codexAccountRotation;
+    if (
+      rotation &&
+      typeof rotation.initialConnectionId === "string" &&
+      typeof rotation.finalConnectionId === "string" &&
+      rotation.initialConnectionId !== rotation.finalConnectionId
+    ) {
+      return rotation;
+    }
+  }
+
+  return null;
+}
+
+function formatConnectionId(value) {
+  if (typeof value !== "string" || value.length === 0) return "-";
+  return value.length > 8 ? `${value.slice(0, 8)}...` : value;
+}
+
 export default function RequestLoggerDetail({
   log,
   detail,
@@ -268,6 +292,7 @@ export default function RequestLoggerDetail({
       ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
       : "bg-sky-500/20 text-sky-700 dark:text-sky-300 border-sky-500/30";
   const accountLabel = maskAccount(detail?.account || log.account, emailsVisible);
+  const codexAccountRotation = getCodexAccountRotation(detail);
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center pt-[5vh]"
@@ -426,12 +451,16 @@ export default function RequestLoggerDetail({
                   {tokenStats.compressed != null &&
                     tokenStats.compressed > 0 &&
                     (() => {
-                      const fromTokens = tokenStats.totalIn + tokenStats.compressed;
-                      const pct = Math.round((tokenStats.compressed / fromTokens) * 100);
+                      const fromTokens = tokenStats.compressed + Math.max(0, tokenStats.totalIn);
+                      const saved = Math.min(tokenStats.compressed, fromTokens);
+                      const pct =
+                        fromTokens > 0
+                          ? Math.max(0, Math.min(100, Math.round((saved / fromTokens) * 100)))
+                          : 100;
                       return (
                         <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-700 dark:text-purple-300 text-xs font-bold">
-                          Compressed: {fromTokens.toLocaleString()} \u2192{" "}
-                          {tokenStats.totalIn.toLocaleString()} (-{pct}%)
+                          Compressed: {fromTokens.toLocaleString()} →{" "}
+                          {Math.max(0, tokenStats.totalIn).toLocaleString()} ({pct}% saved)
                         </span>
                       );
                     })()}
@@ -511,6 +540,15 @@ export default function RequestLoggerDetail({
                   Account
                 </div>
                 <div className="text-sm font-medium">{accountLabel}</div>
+                {codexAccountRotation && (
+                  <div
+                    className="mt-1 text-[10px] text-amber-600 dark:text-amber-400 font-mono"
+                    title={`${codexAccountRotation.initialConnectionId} -> ${codexAccountRotation.finalConnectionId}`}
+                  >
+                    Rotated: {formatConnectionId(codexAccountRotation.initialConnectionId)} -&gt;{" "}
+                    {formatConnectionId(codexAccountRotation.finalConnectionId)}
+                  </div>
+                )}
               </div>
               <div>
                 <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">

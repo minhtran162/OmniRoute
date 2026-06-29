@@ -1,7 +1,7 @@
 ---
 title: "API Reference"
-version: 3.8.2
-lastUpdated: 2026-05-13
+version: 3.8.40
+lastUpdated: 2026-06-28
 ---
 
 # API Reference
@@ -60,22 +60,22 @@ Content-Type: application/json
 
 ### Custom Headers
 
-| Header                   | Direction | Description                                      |
-| ------------------------ | --------- | ------------------------------------------------ |
-| `X-OmniRoute-No-Cache`   | Request   | Set to `true` to bypass cache                    |
+| Header                   | Direction | Description                                                                                                                  |
+| ------------------------ | --------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `X-OmniRoute-No-Cache`   | Request   | Set to `true` to bypass cache                                                                                                |
 | `x-omniroute-no-memory`  | Request   | Set to `true` to skip memory + skills injection for this request (mirrors no-cache; avoids the per-call token/cost overhead) |
-| `X-OmniRoute-Progress`   | Request   | Set to `true` for progress events                |
-| `X-Session-Id`           | Request   | Sticky session key for external session affinity |
-| `x_session_id`           | Request   | Underscore variant also accepted (direct HTTP)   |
-| `Idempotency-Key`        | Request   | Dedup key (5s window)                            |
-| `X-Request-Id`           | Request   | Alternative dedup key                            |
-| `X-OmniRoute-Cache`      | Response  | `HIT` or `MISS` (non-streaming)                  |
-| `X-OmniRoute-Idempotent` | Response  | `true` if deduplicated                           |
-| `X-OmniRoute-Progress`   | Response  | `enabled` if progress tracking on                |
-| `X-OmniRoute-Session-Id` | Response  | Effective session ID used by OmniRoute           |
-| `X-OmniRoute-Request-Id` | Response  | Request correlation id (when known)              |
-| `X-OmniRoute-Version`    | Response  | OmniRoute build version (always present)         |
-| `X-OmniRoute-Cost-Saved` | Response  | USD the cache avoided on a HIT (cache hits only) |
+| `X-OmniRoute-Progress`   | Request   | Set to `true` for progress events                                                                                            |
+| `X-Session-Id`           | Request   | Sticky session key for external session affinity                                                                             |
+| `x_session_id`           | Request   | Underscore variant also accepted (direct HTTP)                                                                               |
+| `Idempotency-Key`        | Request   | Dedup key (5s window)                                                                                                        |
+| `X-Request-Id`           | Request   | Alternative dedup key                                                                                                        |
+| `X-OmniRoute-Cache`      | Response  | `HIT` or `MISS` (non-streaming)                                                                                              |
+| `X-OmniRoute-Idempotent` | Response  | `true` if deduplicated                                                                                                       |
+| `X-OmniRoute-Progress`   | Response  | `enabled` if progress tracking on                                                                                            |
+| `X-OmniRoute-Session-Id` | Response  | Effective session ID used by OmniRoute                                                                                       |
+| `X-OmniRoute-Request-Id` | Response  | Request correlation id (when known)                                                                                          |
+| `X-OmniRoute-Version`    | Response  | OmniRoute build version (always present)                                                                                     |
+| `X-OmniRoute-Cost-Saved` | Response  | USD the cache avoided on a HIT (cache hits only)                                                                             |
 
 > Nginx note: if you rely on underscore headers (for example `x_session_id`), enable `underscores_in_headers on;`.
 
@@ -88,14 +88,15 @@ Content-Type: application/json
 Per-request override of the compression plan. Highest precedence — beats the routing-combo
 override, the active profile, auto-trigger, and the panel Default. Values:
 
-| Value | Effect |
-|-------|--------|
-| `off` | No compression for this request. |
-| `default` | The panel-derived Default profile (ignores the active profile). |
-| `engine:<id>` | A single engine when enabled, e.g. `engine:rtk`. |
-| `<combo>` | A named combo, matched by name (case-insensitive) first, then by id. |
+| Value         | Effect                                                               |
+| ------------- | -------------------------------------------------------------------- |
+| `off`         | No compression for this request.                                     |
+| `default`     | The panel-derived Default profile (ignores the active profile).      |
+| `engine:<id>` | A single engine when enabled, e.g. `engine:rtk`.                     |
+| `<combo>`     | A named combo, matched by name (case-insensitive) first, then by id. |
 
 Notes:
+
 - Unknown values are ignored (the request is never rejected); resolution falls through to the normal operator precedence.
 - If multiple combos share a name, pass the combo **id** for a deterministic match.
 - A combo whose name is `off` or `default` cannot be selected by name (those keywords are interpreted first); reference such a combo by its id.
@@ -1040,15 +1041,14 @@ Returns the public A2A agent card (name, description, capabilities, skill catalo
 
 ## ACP (Agent Client Protocol) Management
 
-The ACP framework lets you spawn CLI agents (Claude Code, Codex, Gemini CLI, etc.)
 as child processes. These endpoints manage ACP agent detection and custom agent
 registration.
 
-| Method | Path                    | Description                                                                              |
-| ------ | ----------------------- | ---------------------------------------------------------------------------------------- |
-| GET    | `/api/acp/agents`       | List all known CLI agents (built-in + custom) with installation status, version, binary |
-| POST   | `/api/acp/agents`       | Register a custom ACP agent or refresh cache — body: `{id, name, binary, versionCommand, providerAlias, spawnArgs, protocol}` or `{action: "refresh"}` |
-| DELETE | `/api/acp/agents`       | Remove a custom ACP agent — query param: `?id=<agentId>`                                 |
+| Method | Path              | Description                                                                                                                                            |
+| ------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/api/acp/agents` | List all known CLI agents (built-in + custom) with installation status, version, binary                                                                |
+| POST   | `/api/acp/agents` | Register a custom ACP agent or refresh cache — body: `{id, name, binary, versionCommand, providerAlias, spawnArgs, protocol}` or `{action: "refresh"}` |
+| DELETE | `/api/acp/agents` | Remove a custom ACP agent — query param: `?id=<agentId>`                                                                                               |
 
 **Response example** (`GET /api/acp/agents`):
 
@@ -1185,10 +1185,10 @@ diversity. These power the `/dashboard/analytics/*` pages.
 
 Admin-only endpoints for operational management.
 
-| Method | Path                            | Description                                                                                    |
-| ------ | ------------------------------- | ---------------------------------------------------------------------------------------------- |
-| GET    | `/api/admin/concurrency`         | Read current concurrency limits (global + per-provider)                                        |
-| POST   | `/api/admin/concurrency`         | Update concurrency limits — body: `{global?: number, perProvider?: Record<string, number>}`     |
+| Method | Path                     | Description                                                                                 |
+| ------ | ------------------------ | ------------------------------------------------------------------------------------------- |
+| GET    | `/api/admin/concurrency` | Read current concurrency limits (global + per-provider)                                     |
+| POST   | `/api/admin/concurrency` | Update concurrency limits — body: `{global?: number, perProvider?: Record<string, number>}` |
 
 **Auth:** Requires management session with admin scope.
 
@@ -1236,14 +1236,14 @@ Manage AI agent skills (similar to OpenAI's custom GPTs but for agents).
 
 Manage the semantic cache and reasoning cache.
 
-| Method | Path                              | Description                                                                                  |
-| ------ | --------------------------------- | -------------------------------------------------------------------------------------------- |
-| GET    | `/api/cache`                       | Cache overview: total entries, hit rate, size on disk                                        |
-| GET    | `/api/cache/entries`               | List cached entries (with pagination)                                                        |
-| DELETE | `/api/cache/entries`               | Delete cache entries (filter by query parameters)                                             |
-| GET    | `/api/cache/stats`                 | Detailed cache statistics (per-provider, per-model)                                           |
-| GET    | `/api/cache/reasoning`             | Reasoning cache status (for reasoning replay)                                                |
-| DELETE | `/api/cache/reasoning`             | Clear reasoning cache — query params: `?toolCallId=<id>` (single) or `?provider=<p>` or no params (all) |
+| Method | Path                   | Description                                                                                             |
+| ------ | ---------------------- | ------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/cache`           | Cache overview: total entries, hit rate, size on disk                                                   |
+| GET    | `/api/cache/entries`   | List cached entries (with pagination)                                                                   |
+| DELETE | `/api/cache/entries`   | Delete cache entries (filter by query parameters)                                                       |
+| GET    | `/api/cache/stats`     | Detailed cache statistics (per-provider, per-model)                                                     |
+| GET    | `/api/cache/reasoning` | Reasoning cache status (for reasoning replay)                                                           |
+| DELETE | `/api/cache/reasoning` | Clear reasoning cache — query params: `?toolCallId=<id>` (single) or `?provider=<p>` or no params (all) |
 
 **Auth:** Requires management session.
 
@@ -1293,14 +1293,14 @@ See [Webhooks Framework](../frameworks/WEBHOOKS.md) for full event types.
 
 Manage Skills (the agentic extensions framework).
 
-| Method | Path                              | Description                                                                                  |
-| ------ | --------------------------------- | -------------------------------------------------------------------------------------------- |
-| GET    | `/api/skills`                      | List all installed skills (built-in + custom)                                                 |
-| POST   | `/api/skills/install`              | Install a skill from a local path or URL                                                      |
-| DELETE | `/api/skills/[id]`                 | Uninstall a skill                                                                             |
-| PUT    | `/api/skills/[id]`                 | Enable or disable a skill — body: `{enabled?: boolean, mode?: "on" \| "off" \| "auto"}`      |
-| POST   | `/api/skills/executions`           | Execute a skill — body: `{skillName, apiKeyId, input?, sessionId?}`                          |
-| GET    | `/api/skills/executions`           | List execution history for all skills (filter by `?apiKeyId=`)                               |
+| Method | Path                     | Description                                                                             |
+| ------ | ------------------------ | --------------------------------------------------------------------------------------- |
+| GET    | `/api/skills`            | List all installed skills (built-in + custom)                                           |
+| POST   | `/api/skills/install`    | Install a skill from a local path or URL                                                |
+| DELETE | `/api/skills/[id]`       | Uninstall a skill                                                                       |
+| PUT    | `/api/skills/[id]`       | Enable or disable a skill — body: `{enabled?: boolean, mode?: "on" \| "off" \| "auto"}` |
+| POST   | `/api/skills/executions` | Execute a skill — body: `{skillName, apiKeyId, input?, sessionId?}`                     |
+| GET    | `/api/skills/executions` | List execution history for all skills (filter by `?apiKeyId=`)                          |
 
 **Auth:** Requires management session or management-scoped API key.
 
@@ -1312,19 +1312,19 @@ See [Skills Framework](../frameworks/SKILLS.md) for full details.
 
 Manage OmniRoute plugins (third-party extensions).
 
-| Method | Path                              | Description                                                                                  |
-| ------ | --------------------------------- | -------------------------------------------------------------------------------------------- |
-| GET    | `/api/plugins`                     | List installed plugins                                                                        |
-| POST   | `/api/plugins/install`             | Install a plugin from a local path or URL                                                     |
-| DELETE | `/api/plugins/[name]`              | Uninstall a plugin                                                                            |
-| POST   | `/api/plugins/[name]/activate`     | Activate a plugin                                                                             |
-| POST   | `/api/plugins/[name]/deactivate`   | Deactivate a plugin                                                                           |
-| GET    | `/api/plugins/[name]/config`       | Get plugin configuration                                                                      |
-| PUT    | `/api/plugins/[name]/config`       | Update plugin configuration                                                                  |
+| Method | Path                             | Description                               |
+| ------ | -------------------------------- | ----------------------------------------- |
+| GET    | `/api/plugins`                   | List installed plugins                    |
+| POST   | `/api/plugins/install`           | Install a plugin from a local path or URL |
+| DELETE | `/api/plugins/[name]`            | Uninstall a plugin                        |
+| POST   | `/api/plugins/[name]/activate`   | Activate a plugin                         |
+| POST   | `/api/plugins/[name]/deactivate` | Deactivate a plugin                       |
+| GET    | `/api/plugins/[name]/config`     | Get plugin configuration                  |
+| PUT    | `/api/plugins/[name]/config`     | Update plugin configuration               |
 
 **Auth:** Requires management session.
 
-See [Plugins Framework](../plugins/PLUGIN_SDK.md) for full details.
+See [Plugins Framework](../frameworks/PLUGIN_SDK.md) for full details.
 
 ---
 

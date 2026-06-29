@@ -1,7 +1,11 @@
 openapi: 3.1.0
 info:
   title: OmniRoute API
+<<<<<<< HEAD
   version: 3.8.35
+=======
+  version: 3.8.40
+>>>>>>> ecb17e6b50a2d495e8c74064a26ae1b5f2e1fc37
   description: |
     OmniRoute is a local-first AI API proxy router. It provides an OpenAI-compatible
     endpoint that routes requests to multiple AI providers with load balancing,
@@ -6672,10 +6676,19 @@ components:
             - least-used
             - cost-optimized
             - reset-aware
+<<<<<<< HEAD
+=======
+            - reset-window
+            - headroom
+>>>>>>> ecb17e6b50a2d495e8c74064a26ae1b5f2e1fc37
             - strict-random
             - auto
             - lkgp
             - context-optimized
+<<<<<<< HEAD
+=======
+            - fusion
+>>>>>>> ecb17e6b50a2d495e8c74064a26ae1b5f2e1fc37
           default: priority
         nodes:
           type: array

@@ -78,6 +78,8 @@ bun.lock
 .agents
 .claude
 .gemini
+.claude
+.source
 
 # Misc
 llm.txt
