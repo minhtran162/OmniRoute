@@ -14,6 +14,8 @@ const core = await import("../../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../../src/lib/db/apiKeys.ts");
 const settingsDb = await import("../../../src/lib/db/settings.ts");
 const pipeline = await import("../../../src/server/authz/pipeline.ts");
+const csrf = await import("../../../src/server/authz/csrf.ts");
+const dashboardCsrfConstants = await import("../../../src/shared/constants/dashboardCsrf.ts");
 
 const ORIGINAL_JWT = process.env.JWT_SECRET;
 const ORIGINAL_INITIAL = process.env.INITIAL_PASSWORD;
@@ -64,6 +66,7 @@ test.beforeEach(() => {
 });
 
 test.after(() => {
+  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   if (ORIGINAL_JWT === undefined) delete process.env.JWT_SECRET;
   else process.env.JWT_SECRET = ORIGINAL_JWT;
@@ -134,6 +137,50 @@ test("runAuthzPipeline redirects unauthenticated /home/* nested paths to login (
   assert.equal(response.status, 307);
   assert.equal(response.headers.get("location"), "http://localhost/login");
   assert.equal(response.headers.get("x-omniroute-route-class"), "MANAGEMENT");
+});
+
+// PR #1810 (upstream 9router): reverse-proxy subpath deployment via
+// OMNIROUTE_BASE_PATH. Next.js strips the basePath from nextUrl.pathname
+// before route classification, so the redirect targets must re-add it via
+// request.nextUrl.basePath to stay inside the deployed subpath.
+test("runAuthzPipeline prefixes the root-to-dashboard redirect with basePath when set", async () => {
+  await forceAuthRequired();
+
+  const req = new NextRequest("http://localhost/omniroute/", {
+    nextConfig: { basePath: "/omniroute" },
+  });
+
+  const response = await pipeline.runAuthzPipeline(req, { enforce: true });
+
+  assert.equal(response.status, 307);
+  assert.equal(response.headers.get("location"), "http://localhost/omniroute/dashboard");
+});
+
+test("runAuthzPipeline prefixes the dashboard login redirect with basePath when set", async () => {
+  await forceAuthRequired();
+
+  const req = new NextRequest("http://localhost/omniroute/dashboard", {
+    nextConfig: { basePath: "/omniroute" },
+  });
+
+  const response = await pipeline.runAuthzPipeline(req, { enforce: true });
+
+  assert.equal(response.status, 307);
+  assert.equal(response.headers.get("location"), "http://localhost/omniroute/login");
+  assert.equal(response.headers.get("x-omniroute-route-class"), "MANAGEMENT");
+});
+
+test("runAuthzPipeline leaves redirect targets unprefixed when basePath is empty", async () => {
+  await forceAuthRequired();
+
+  const req = new NextRequest("http://localhost/dashboard", {
+    nextConfig: { basePath: "" },
+  });
+
+  const response = await pipeline.runAuthzPipeline(req, { enforce: true });
+
+  assert.equal(response.status, 307);
+  assert.equal(response.headers.get("location"), "http://localhost/login");
 });
 
 test("runAuthzPipeline allows onboarding when login is required but no password exists", async () => {
@@ -323,6 +370,100 @@ test("runAuthzPipeline accepts dashboard mutations from configured public origin
   assert.equal(response.headers.get("x-omniroute-route-class"), "MANAGEMENT");
 });
 
+test("runAuthzPipeline rejects dashboard mutations from dynamic public origins without CSRF", async () => {
+  await forceAuthRequired();
+
+  const response = await pipeline.runAuthzPipeline(
+    request("http://127.0.0.1:20128/api/settings", {
+      method: "PATCH",
+      headers: {
+        cookie: await dashboardCookie(),
+        host: "127.0.0.1:20128",
+        origin: "https://random-tunnel.example.test",
+        "content-type": "application/json",
+        "sec-fetch-site": "same-origin",
+      },
+      body: "{}",
+    }),
+    { enforce: true }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 403);
+  assert.equal(body.error.code, "INVALID_ORIGIN");
+});
+
+test("runAuthzPipeline accepts dashboard mutations from dynamic public origins with CSRF", async () => {
+  await forceAuthRequired();
+
+  const cookie = await dashboardCookie();
+  const issued = csrf.issueDashboardCsrfToken(
+    request("http://127.0.0.1:20128/api/auth/csrf", {
+      headers: { cookie },
+    })
+  );
+  assert.ok(issued);
+
+  for (const [method, path] of [
+    ["POST", "/api/models/test"],
+    ["POST", "/api/keys"],
+    ["PATCH", "/api/settings"],
+    ["PUT", "/api/combos/combo-1"],
+    ["DELETE", "/api/webhooks/webhook-1"],
+  ] as const) {
+    const response = await pipeline.runAuthzPipeline(
+      request(`http://127.0.0.1:20128${path}`, {
+        method,
+        headers: {
+          cookie,
+          host: "127.0.0.1:20128",
+          origin: "https://random-tunnel.example.test",
+          "content-type": "application/json",
+          [dashboardCsrfConstants.DASHBOARD_CSRF_HEADER]: issued.token,
+          "sec-fetch-site": "same-origin",
+        },
+        body: "{}",
+      }),
+      { enforce: true }
+    );
+
+    assert.equal(response.status, 200, path);
+    assert.equal(response.headers.get("x-omniroute-route-class"), "MANAGEMENT");
+  }
+});
+
+test("runAuthzPipeline does not let CSRF bypass cross-site fetch metadata", async () => {
+  await forceAuthRequired();
+
+  const cookie = await dashboardCookie();
+  const issued = csrf.issueDashboardCsrfToken(
+    request("http://127.0.0.1:20128/api/auth/csrf", {
+      headers: { cookie },
+    })
+  );
+  assert.ok(issued);
+
+  const response = await pipeline.runAuthzPipeline(
+    request("http://127.0.0.1:20128/api/settings", {
+      method: "PATCH",
+      headers: {
+        cookie,
+        host: "127.0.0.1:20128",
+        origin: "https://random-tunnel.example.test",
+        "content-type": "application/json",
+        [dashboardCsrfConstants.DASHBOARD_CSRF_HEADER]: issued.token,
+        "sec-fetch-site": "cross-site",
+      },
+      body: "{}",
+    }),
+    { enforce: true }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 403);
+  assert.equal(body.error.code, "INVALID_ORIGIN");
+});
+
 test("runAuthzPipeline rejects dashboard mutations from invalid browser origin", async () => {
   await forceAuthRequired();
   process.env.NEXT_PUBLIC_BASE_URL = "https://gateway.example.test";
@@ -423,4 +564,39 @@ test("runAuthzPipeline refreshes dashboard JWTs near expiry", async () => {
 
   assert.equal(response.status, 200);
   assert.match(response.headers.get("set-cookie") || "", /auth_token=/);
+});
+
+test("runAuthzPipeline clears stale dashboard JWTs without error-stack noise", async () => {
+  await forceAuthRequired();
+  const oldSecret = new TextEncoder().encode("old-dashboard-jwt-secret");
+  const staleToken = await new SignJWT({ authenticated: true })
+    .setProtectedHeader({ alg: "HS256" })
+    .setExpirationTime("1h")
+    .sign(oldSecret);
+
+  const errorCalls: unknown[][] = [];
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  console.error = (...args: unknown[]) => {
+    errorCalls.push(args);
+  };
+  console.warn = () => {};
+
+  try {
+    const response = await pipeline.runAuthzPipeline(
+      request("http://localhost/dashboard", {
+        headers: { cookie: `auth_token=${staleToken}` },
+      }),
+      { enforce: true }
+    );
+
+    assert.equal(response.status, 307);
+    const setCookie = response.headers.get("set-cookie") || "";
+    assert.match(setCookie, /auth_token=/);
+    assert.match(setCookie, /Max-Age=0|Expires=/i);
+    assert.equal(errorCalls.length, 0);
+  } finally {
+    console.error = originalError;
+    console.warn = originalWarn;
+  }
 });

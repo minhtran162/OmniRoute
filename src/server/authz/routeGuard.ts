@@ -22,12 +22,15 @@
  */
 
 import { getAuthzBypassSnapshot } from "@/lib/config/runtimeSettings";
+import { SPAWN_CAPABLE_PREFIXES } from "@/shared/constants/spawnCapablePrefixes";
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 export const LOCAL_ONLY_API_PREFIXES: ReadonlyArray<string> = [
   "/api/mcp/",
   "/api/cli-tools/runtime/",
+  "/api/cli-tools/omp-settings", // spawns `which omp` to detect the CLI install (Hard Rules #15 + #17, #6318)
+  "/api/cli-tools/letta-settings", // spawns `which letta` to detect the CLI install (Hard Rules #15 + #17, #6318)
   "/api/services/", // T-10: embedded service lifecycle (spawn child processes)
   "/dashboard/providers/services/", // T-07: reverse proxy to embedded service UIs
   "/api/copilot/", // unauthenticated LLM driver — CLI-only by default; admins can opt-in to remote access via manage-scope bypass
@@ -35,12 +38,15 @@ export const LOCAL_ONLY_API_PREFIXES: ReadonlyArray<string> = [
   "/api/tools/traffic-inspector/", // Traffic Inspector: http-proxy listener + system proxy (Hard Rules #15 + #17)
   "/api/plugins/", // plugins: load/execute via worker_threads + child_process (Hard Rules #15 + #17)
   "/api/plugins", // bare path: GET list + POST install also trigger plugin loading
+  "/api/middleware/", // SECURITY_AUDIT M8: middleware hooks compile+run arbitrary JS via new vm.Script (src/lib/middleware/registry.ts) on the request hot path — same code-exec class as /api/plugins/, so loopback-gate it for parity (Hard Rules #15 + #17)
   "/api/system/version", // auto-update: spawns git checkout + npm install — RCE-via-tunnel surface (Hard Rules #15 + #17, found by 6A.8 route-guard gate)
   "/api/db-backups/exportAll", // spawns tar for export archive (Hard Rules #15 + #17, found by 6A.8 route-guard gate)
   "/api/local/", // T-12: 1-click local service launchers (Redis today; spawns podman/docker) — loopback-enforced by isLocalRequestAllowed() in src/lib/security/localEndpoints.ts (Hard Rules #15 + #17)
   "/api/headroom/start", // Headroom token-saver proxy lifecycle: spawns headroom-ai python CLI (Hard Rules #15 + #17)
   "/api/headroom/stop", // Headroom token-saver proxy lifecycle: sends SIGTERM/SIGKILL to managed PID (Hard Rules #15 + #17)
   "/api/oauth/cursor/auto-import", // spawns `execFile("which", ["cursor"])` to verify a local Cursor install before importing creds — RCE-via-tunnel surface (Hard Rules #15 + #17, found by 6A.8 route-guard gate). Specific path only: the rest of /api/oauth/ (browser redirect/callback flows) must stay remote-reachable.
+  "/api/skills/collect/", // Skill Collector CLI detection: GET .../detect probes getCliRuntimeStatus() per CLI_TOOL_IDS entry, which spawns a child process to check each tool — RCE-via-tunnel surface (Hard Rules #15 + #17, PR #6294 review).
+  "/api/discovery/", // Discovery tool (opt-in provider scanner): the scan route makes outbound probes to provider endpoints (SSRF-adjacent) and the whole surface is an admin research tool — strict-loopback only, no manage-scope bypass (NOT in LOCAL_ONLY_MANAGE_SCOPE_BYPASS_PREFIXES). See _tasks/features-v3.8.42/gaps/DISCOVERY_TOOL_DESIGN.md.
 ];
 
 /**
@@ -59,31 +65,13 @@ export const LOCAL_ONLY_API_PATTERNS: ReadonlyArray<RegExp> = [
   /^\/api\/providers\/[^/]+\/login\/?$/,
 ];
 
-/**
- * Compile-time deny-list: route prefixes that can spawn arbitrary local
- * subprocesses on behalf of the caller. These MUST NEVER appear in the
- * manage-scope bypass list — regardless of DB state — because reaching them
- * from non-loopback would re-introduce the GHSA-fhh6-4qxv-rpqj surface that
- * the LOCAL_ONLY tier exists to close.
- *
- * Enforced at two layers:
- *   1. zod schema (`settingsSchemas.ts`): rejects `PATCH /api/settings` with
- *      error code `BYPASS_PREFIX_NOT_ALLOWED` if any entry in
- *      `localOnlyManageScopeBypassPrefixes` falls inside this set.
- *   2. runtime (`isLocalOnlyBypassableByManageScope` below): even if a
- *      malformed DB row somehow claims a spawn-capable path is bypassable,
- *      the policy still refuses to honour it.
- */
-export const SPAWN_CAPABLE_PREFIXES: ReadonlyArray<string> = [
-  "/api/cli-tools/runtime/",
-  "/api/services/", // T-10: can run npm install + spawn node processes
-  "/api/tools/agent-bridge/", // start/stop MITM server + DNS edits (Hard Rules #15 + #17)
-  "/api/tools/traffic-inspector/", // http-proxy listener + system proxy (Hard Rules #15 + #17)
-  "/api/plugins/", // plugins: load/execute via worker_threads + child_process (Hard Rules #15 + #17)
-  "/api/local/", // T-12: 1-click local service launchers (Redis today) — must never be whitelistable via manage-scope bypass (Hard Rules #15 + #17)
-  "/api/headroom/start", // spawns headroom-ai python CLI — must never be bypassable (Hard Rules #15 + #17)
-  "/api/headroom/stop", // kills tracked PID — must never be bypassable (Hard Rules #15 + #17)
-];
+// `SPAWN_CAPABLE_PREFIXES` (the spawn-capable deny-list) now lives in the
+// server-free leaf module `@/shared/constants/spawnCapablePrefixes` so that
+// client-reachable validation schemas can import it without pulling this module's
+// server runtime (runtimeSettings → localDb → ioredis) into the browser bundle.
+// Imported above for the runtime check in `isLocalOnlyBypassableByManageScope`;
+// re-exported here so existing `@/server/authz/routeGuard` importers keep working.
+export { SPAWN_CAPABLE_PREFIXES };
 
 /**
  * Compile-time default of the manage-scope bypass list. Kept as an exported

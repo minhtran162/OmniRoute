@@ -8,12 +8,7 @@ import {
   getCustomModels,
 } from "@/lib/localDb";
 import { getCachedSettings } from "@/lib/localDb";
-import { getComboStepTarget } from "@/lib/combos/steps";
-import {
-  parseModel,
-  resolveModelAliasFromMap,
-  getModelInfoCore,
-} from "@omniroute/open-sse/services/model.ts";
+import { parseModel, getModelInfoCore } from "@omniroute/open-sse/services/model.ts";
 import { REGISTRY } from "@omniroute/open-sse/config/providerRegistry.ts";
 
 export { parseModel };
@@ -68,14 +63,6 @@ async function getCombinedModelAliases(): Promise<Record<string, unknown>> {
 }
 
 /**
- * Resolve model alias from localDb
- */
-export async function resolveModelAlias(alias) {
-  const aliases = await getModelAliases();
-  return resolveModelAliasFromMap(alias, aliases);
-}
-
-/**
  * Look up custom-model metadata from the DB in a single read:
  *  - apiFormat: "responses" when the model is configured for the Responses API.
  *  - targetFormat: the optional per-model wire format override (#2905).
@@ -96,6 +83,22 @@ async function lookupCustomModelMeta(
   } catch {
     return {};
   }
+}
+
+/**
+ * When a custom provider node is matched by its raw internal `node.id` (e.g. a combo
+ * step addressing `<connId>/...` — see #2778), `parsed.model` was never split on the
+ * node's own `prefix`, unlike the alias-addressing path where `parseModel` already
+ * strips it. If the caller naively concatenates `owned_by` (the node's prefix, as
+ * listed by /api/models) with the raw model id, the resulting model string carries a
+ * redundant leading `${node.prefix}/` segment that the upstream provider does not
+ * recognize, causing a 400. Strip it so `<connId>/<prefix>/<rawModelId>` normalizes to
+ * the same `<rawModelId>` the bare alias form resolves to (#6772).
+ */
+function stripRedundantNodePrefix(model: string, nodePrefix: unknown): string {
+  if (typeof nodePrefix !== "string" || !nodePrefix) return model;
+  const redundant = `${nodePrefix}/`;
+  return model.startsWith(redundant) ? model.slice(redundant.length) : model;
 }
 
 /**
@@ -146,13 +149,17 @@ export async function getModelInfo(modelStr) {
         (node) => node.prefix === prefixToCheck || node.id === prefixToCheck
       );
       if (matchedOpenAI) {
+        const normalizedModel = stripRedundantNodePrefix(
+          parsed.model as string,
+          matchedOpenAI.prefix
+        );
         const { apiFormat, targetFormat } = await lookupCustomModelMeta(
           matchedOpenAI.id as string,
-          parsed.model as string
+          normalizedModel
         );
         return {
           provider: matchedOpenAI.id,
-          model: parsed.model,
+          model: normalizedModel,
           extendedContext,
           ...(apiFormat && { apiFormat }),
           ...(targetFormat && { targetFormat }),
@@ -165,13 +172,17 @@ export async function getModelInfo(modelStr) {
         (node) => node.prefix === prefixToCheck || node.id === prefixToCheck
       );
       if (matchedAnthropic) {
+        const normalizedModel = stripRedundantNodePrefix(
+          parsed.model as string,
+          matchedAnthropic.prefix
+        );
         const { apiFormat, targetFormat } = await lookupCustomModelMeta(
           matchedAnthropic.id as string,
-          parsed.model as string
+          normalizedModel
         );
         return {
           provider: matchedAnthropic.id,
-          model: parsed.model,
+          model: normalizedModel,
           extendedContext,
           ...(apiFormat && { apiFormat }),
           ...(targetFormat && { targetFormat }),
@@ -264,16 +275,4 @@ export async function getComboForModel(modelStr) {
   }
 
   return null;
-}
-
-/**
- * Legacy: get combo models as string array
- * @returns {Promise<string[]|null>}
- */
-export async function getComboModels(modelStr) {
-  const combo = await getCombo(modelStr);
-  if (!combo) return null;
-  return (combo.models || [])
-    .map((entry) => getComboStepTarget(entry))
-    .filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
 }

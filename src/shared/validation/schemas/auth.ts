@@ -133,7 +133,10 @@ export const oauthPollSchema = z.object({
 
 /** Import a raw API token (e.g. WINDSURF_API_KEY) without going through the browser OAuth flow. */
 export const oauthImportTokenSchema = z.object({
-  token: z.union([z.string().trim().min(1, "Token is required"), z.record(z.string(), z.unknown())]),
+  token: z.union([
+    z.string().trim().min(1, "Token is required"),
+    z.record(z.string(), z.unknown()),
+  ]),
   connectionId: z.string().optional(),
 });
 
@@ -190,12 +193,16 @@ export const kiroImportSchema = z.object({
   clientSecret: z.string().optional(),
   authMethod: z.string().optional(),
   profileArn: z.string().optional(),
+  // External IdP ("Your organization" / Microsoft Entra) token fields — present
+  // when authMethod === "external_idp". The token is refreshed via a public-client
+  // OAuth2 grant against `tokenEndpoint` using `clientId` + `scopes` (no secret).
+  tokenEndpoint: z.string().optional(),
+  scopes: z.union([z.string(), z.array(z.string())]).optional(),
 });
 
-export const kiroSocialExchangeSchema = z.object({
-  code: z.string().trim().min(1, "Code is required"),
-  codeVerifier: z.string().trim().min(1, "Code verifier is required"),
-  provider: z.enum(["google", "github"]),
+export const kiroApiKeyImportSchema = z.object({
+  apiKey: z.string().trim().min(1, "API key is required"),
+  region: z.string().trim().default("us-east-1"),
 });
 
 export const zedImportSchema = z.object({

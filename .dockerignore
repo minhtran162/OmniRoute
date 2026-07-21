@@ -126,3 +126,4 @@ app.__qa_backup/
 .worktrees
 .next-playwright/
 cloud/
+electron/dist-electron
